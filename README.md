@@ -10,7 +10,7 @@ Demos : https://sketchpunklabs.github.io/mapping/
 ### Development Setup ###
 ```
 git clone --depth=1 https://github.com/sketchpunklabs/mapping
-cd materials
+cd mapping
 npm install
 npm run start
 ```
