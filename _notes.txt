@@ -1,0 +1,31 @@
+
+// size = tileSize * Math.pow( 2, zoom );
+
+
+https://developer.tomtom.com/map-display-api/documentation/zoom-levels-and-tile-grid
+
+
+// https://learn.microsoft.com/en-us/azure/azure-maps/zoom-levels-and-tile-grid?tabs=csharp
+// Given latitude and longitude in degrees, and the level of detail, the pixel XY coordinates
+var sinLatitude = Math.sin(latitude * Math.PI/180);
+var pixelX = ((longitude + 180) / 360) * tileSize * Math.pow(2, zoom);
+var pixelY = (0.5 – Math.log((1 + sinLatitude) / (1 – sinLatitude)) / (4 * Math.PI)) * tileSize * Math.pow(2, zoom);
+
+var numberOfTilesWide = Math.pow(2, zoom);
+var numberOfTilesHigh = numberOfTilesWide;
+
+var tileX = Math.floor(pixelX / tileSize);
+var tileY = Math.floor(pixelY / tileSize);
+
+
+https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
+Given Longitude/latitude/zoom to tile numbers :
+n = 2 ^ zoom
+xtile = n * ((lon_deg + 180) / 360)
+ytile = n * (1 - (log(tan(lat_rad) + sec(lat_rad)) / π)) / 2
+
+Given Tile numbers to longitude/latitude :
+n = 2 ^ zoom
+lon_deg = xtile / n * 360.0 - 180.0
+lat_rad = arctan(sinh(π * (1 - 2 * ytile / n)))
+lat_deg = lat_rad * 180.0 / 

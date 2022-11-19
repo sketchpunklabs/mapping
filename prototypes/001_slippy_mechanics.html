@@ -1,0 +1,221 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+// #region IMPORTS
+import Starter, { THREE }   from '../lib/Starter.js';
+import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+// #endregion
+
+
+// #region MAIN
+let App;
+let Debug = {};
+
+const HitZoom  = new Set();   // Keep Track which Zoom levels have had their tiels created
+const Tiles    = [];          // Collection of Mesh Tiles
+const TileSize = 1;
+const ViewPort = {
+    width   : 2,
+    height  : 2,
+    center  : [0,0],    // Position at the center of the viewport
+    zoom    : 0,        // Current Zoom Level
+    minZoom : 0,
+    maxZoom : 3,
+};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.setCamera( 0, 10, 5, [0,0,0] ).render();
+
+	App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Visualize View Port 
+    const hh = ViewPort.height * 0.5;
+    const hw = ViewPort.width * 0.5;
+    const zz = 0.02;
+    Debug.ln.add( [-hw,hh,zz], [-hw,-hh,zz], 0xffffff );
+    Debug.ln.add( [-hw,-hh,zz], [hw,-hh,zz], 0xffffff );
+    Debug.ln.add( [hw,-hh,zz], [hw,hh,zz], 0xffffff );
+    Debug.ln.add( [hw,hh,zz], [-hw,hh,zz], 0xffffff );
+
+    Debug.pnt.add( [-hw,hh,zz], 0xffffff, 4 );
+    Debug.pnt.add( [-hw,-hh,zz], 0xffffff, 4 );
+    Debug.pnt.add( [hw,-hh,zz], 0xffffff, 4 );
+    Debug.pnt.add( [hw,hh,zz], 0xffffff, 4 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Tiles.push( addTile() );
+});
+
+window.addEventListener( 'keydown', e=>{
+    switch( e.key ){
+        case 'ArrowUp'      : stepPos( 0, 1 );break;
+        case 'ArrowDown'    : stepPos( 0, -1 );break;
+        case 'ArrowLeft'    : stepPos( -1, 0 ); break;
+        case 'ArrowRight'   : stepPos( 1, 0 ); break;
+        case 'w'            : stepZoom( 0.1 ); break;
+        case 's'            : stepZoom( -0.1 ); break;
+    }
+});
+
+// #endregion
+
+
+// #region TILES
+class Tile{
+    zoom            = 0;
+    coord           = [0,0];
+    worldPosition   = [0,0,0];
+}
+
+function updateTiles(){
+    let scl;
+    for( const t of Tiles ){
+        const tile = t.userData;
+        scl = 1 + fract( ViewPort.zoom );
+    
+        t.scale.setScalar( scl );
+        t.position.z = -Math.floor( Math.abs( tile.zoom - ViewPort.zoom ) );
+        t.position.x =  tile.worldPosition[ 0 ] * scl - ViewPort.center[ 0 ] ;
+        t.position.y =  tile.worldPosition[ 1 ] * scl - ViewPort.center[ 1 ] ;
+        t.visible    = ( tile.zoom <= ViewPort.zoom );
+    }
+}
+
+function stepZoom( s ){
+    let zoom        = Math.min( ViewPort.maxZoom, Math.max( ViewPort.minZoom, ViewPort.zoom + s ) );
+    let zoomOldF    = Math.floor( ViewPort.zoom );
+    let zoomFloor   = Math.floor( zoom );
+    let zoomGrad    = zoom - zoomFloor;
+    
+    ViewPort.zoom = zoom;
+    if( zoomFloor !== zoomOldF ) subDrivideZoom( zoomOldF );
+
+    updateTiles();
+}
+
+function stepPos( x=0, y=0 ){
+    const s = 0.1;
+    ViewPort.center[ 0 ] += x * s;
+    ViewPort.center[ 1 ] += y * s;
+    updateTiles();
+}
+
+function subDrivideZoom( z ){
+    if( HitZoom.has( z ) ) return;
+    HitZoom.add( z );
+
+    let tile;
+    let add = []; // Can't add tiles while looping the array. So add them afterwards
+
+    for( const t of Tiles ){
+        tile = t.userData;
+        if( tile.zoom !== z ) continue;
+
+        const a = addTile( tile, 0, 0 );
+        const b = addTile( tile, 1, 0 );
+        const c = addTile( tile, 0, 1 );
+        const d = addTile( tile, 1, 1 );
+        
+        add.push( a, b, c, d );
+    }
+
+    Tiles.push( ...add );
+}
+// #endregion
+
+
+// #region MESH
+
+// Create new Mesh Tile
+function addTile( ptile=null, coordX=0, coordY=0 ){
+    const tile = new Tile();
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Compute settings based on parent tile
+    if( ptile ){
+        tile.zoom       = ptile.zoom + 1;
+        tile.coord[ 0 ] = ptile.coord[ 0 ] * 2 + coordX;
+        tile.coord[ 1 ] = ptile.coord[ 1 ] * 2 + coordY;
+
+        const worldSize  = Math.pow( 2, ptile.zoom + 1 ) * TileSize;
+        const worldHSize = worldSize * 0.5;
+        const tileHSize  = TileSize * 0.5;
+
+        tile.worldPosition[ 0 ] =  tile.coord[ 0 ] * TileSize - worldHSize + tileHSize;
+        tile.worldPosition[ 1 ] = -tile.coord[ 1 ] * TileSize + worldHSize - tileHSize;
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mesh = createUnitPlane();
+    mesh.material.map   = offscreenCanvas().draw( tile.zoom, tile.coord[0], tile.coord[1] ).createTexture();
+    mesh.userData       = tile;
+    mesh.position.x     = tile.worldPosition[ 0 ];
+    mesh.position.y     = tile.worldPosition[ 1 ];
+    App.add( mesh );
+    return mesh;
+}
+
+// Create Plane Mesh
+function createUnitPlane( mat ){
+    const geo = new THREE.PlaneGeometry( 1,1,1,1 );
+    //geo.rotateX( Math.PI * -0.5 );
+    // geo.translate( 0.5, 0.0, 0.5 );
+    return new THREE.Mesh( geo, new THREE.MeshBasicMaterial( {color:0x00ffff, side: THREE.DoubleSide }) );
+}
+
+// Created Texture for Plane
+function offscreenCanvas( w=256, h=256 ){
+    const WIDTH  = w;
+    const HEIGHT = h;
+    const canvas = new OffscreenCanvas( w, h );
+    const ctx    = canvas.getContext( '2d' );
+    const self   = { canvas, ctx, };
+
+    self.createTexture = ()=>{
+        const tex           = new THREE.Texture( canvas );
+        tex.generateMipmaps = false;
+        tex.format          = THREE.RGBAFormat;
+        tex.magFilter       = THREE.LinearFilter;
+        tex.minFilter       = THREE.LinearFilter;
+        tex.needsUpdate     = true;
+        return tex;
+    };
+
+    self.draw = ( zoom, x, y )=>{
+        const green = new THREE.Color(0x00ff00);
+        const red   = new THREE.Color(0x00ffff);
+        const color = green.lerpHSL( red, ( zoom - ViewPort.minZoom ) / (ViewPort.maxZoom - ViewPort.minZoom) );
+        ctx.fillStyle = color.getStyle();
+
+        // console.log( ctx.fillStyle, ( zoom - ViewPort.minZoom ) / (ViewPort.maxZoom - ViewPort.minZoom)  );
+        ctx.fillRect(0, 0, WIDTH, HEIGHT );
+
+        ctx.fillStyle       = '#000000';
+        ctx.textAlign       = 'center';
+        ctx.textBaseline    = 'middle';
+        ctx.font            = 'bold ' + WIDTH * 0.1 + 'px arial';
+        ctx.fillText( '(' + zoom + ')', WIDTH / 2, WIDTH * 0.4);
+        ctx.fillText( '(' + x + ', ' + y + ')', WIDTH / 2, WIDTH * 0.6 );
+
+        return self;
+    }
+
+    return self;
+}
+
+// #endregion
+
+
+// #region MISC
+function fract( v ){ return v - Math.floor( v ) }
+// #endregion
+</script>
+
+<div style="position:absolute; bottom:10px; left:10px; color:yellow; font-family:monospace;">
+    <b>[ Arrows ]</b> to move tiles, <b>[ W ]</b> to Zoom In, <b>[ S ]</b> to Zoom out<br>
+    Note: Spin the scene around to see all the zoomed tiles hiding :)
+</div>
+</body></html>
