@@ -1,0 +1,79 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../import-map.js"></script><script type="module">
+// #region IMPORT
+import Starter, { THREE }   from '../lib/Starter.js';
+import MeshUtil             from './lib/MeshUtil.js';
+import fetchTexture         from './lib/fetchTexture.js';
+import fetchAsyncTexture    from './lib/fetchAsyncTexture.js';
+// #endregion
+
+// #region MAIN
+let App;
+let Debug = {};
+
+window.addEventListener( "load", async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.setCamera( 0, 10, 4, [0,1.0,0] ).render();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    // Empire State Building, New York, USA : -73.985428, 40.748817  :: lon, lat in degrees
+    const tCoord = geo2TileNum( -73.985428, 40.748817, 16 );
+
+    loadTile( osm_png( tCoord[0], tCoord[1], tCoord[2] ), [ 0,0.5,0 ] );
+
+    loadTile( stamen_toner_png( tCoord[0], tCoord[1], tCoord[2] ), [ 1.1,0.5,0 ] );
+    loadTile( stamen_terrain_jpg( tCoord[0], tCoord[1], tCoord[2] ), [ -1.1,0.5,0 ] );
+    loadTile( stamen_watercolor_jpg( tCoord[0], tCoord[1], tCoord[2] ), [ 0,1.6,0 ] );
+
+});
+// #endregion
+
+// #region UTIL
+async function loadTile( url, pos ){
+    const tex = await fetchAsyncTexture( url );
+    const mat = new THREE.MeshBasicMaterial( {map:tex, side:THREE.DoubleSide } );
+    const m   = MeshUtil.quad( mat );
+
+    m.position.fromArray( pos );
+    App.add( m );
+}
+
+
+// https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
+function geo2TileNum( dLon, dLat, zoom ){
+    const n    = 2 ** zoom;
+    const rLat = dLat * Math.PI / 180;
+    return [
+        Math.floor( n * ( ( dLon + 180 ) / 360 ) ),        
+        Math.floor( n * ( 1 - Math.log( Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI ) / 2 ),
+        zoom,
+    ];
+}
+
+// #endregion
+
+// #region FREE RASTER TILE PROVIDERS
+function osm_png( x, y, z ) {
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `https://${sub}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
+}
+
+// http://maps.stamen.com/
+function stamen_toner_png( x, y, z, dpr=1 ){
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `https://stamen-tiles-${sub}.a.ssl.fastly.net/toner/${z}/${x}/${y}${dpr >= 2 ? '@2x' : ''}.png`;
+}
+
+function stamen_terrain_jpg( x, y, z, dpr=1 ) {
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `https://stamen-tiles-${sub}.a.ssl.fastly.net/terrain/${z}/${x}/${y}${dpr >= 2 ? '@2x' : ''}.jpg`;
+}
+
+function stamen_watercolor_jpg( x, y, z, dpr=1 ){
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `https://stamen-tiles-${sub}.a.ssl.fastly.net/watercolor/${z}/${x}/${y}${dpr >= 2 ? '@2x' : ''}.jpg`;
+}
+// #endregion
+
+</script></body></html>
