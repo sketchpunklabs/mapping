@@ -8,11 +8,11 @@ let App;
 let Debug = {};
 
 window.addEventListener( "load", _=>{
-	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	App = new Starter( { webgl2:false, grid:true } );
-	App.setCamera( 0, 20, 6, [0,0,0] ).render();
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true } );
+    App.setCamera( 0, 20, 6, [0,0,0] ).render();
 
-	App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.add( (Debug.pnt = new ShapePointsMesh() ) );
     App.add( (Debug.ln  = new DynLinesMesh() ) );
     // App.add( (Debug.px  = new PixelFontMesh() ) );
     // Debug.px.setRes( 3, 2 );

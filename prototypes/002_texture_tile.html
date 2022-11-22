@@ -18,7 +18,7 @@ window.addEventListener( "load", async _=>{
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     // Empire State Building, New York, USA : -73.985428, 40.748817  :: lon, lat in degrees
-    const tCoord = geo2TileNum( -73.985428, 40.748817, 16 );
+    const tCoord = geo2TileNum( -73.985428, 40.748817, 15 );
 
     loadTile( osm_png( tCoord[0], tCoord[1], tCoord[2] ), [ 0,0.5,0 ] );
 

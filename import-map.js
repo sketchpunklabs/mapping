@@ -7,6 +7,7 @@ innerHTML	: `
     {"imports":{
         "three"             : "${prepend}/lib/thirdparty/three.module.min.js",
         "OrbitControls"	    : "${prepend}/lib/thirdparty/OrbitControls.js",
-        "gl-matrix"         : "${prepend}/lib/thirdparty/gl-matrix/index.js"
+        "gl-matrix"         : "${prepend}/lib/thirdparty/gl-matrix/index.js",
+        "earcut"            : "${prepend}/lib/thirdparty/earcut.js"
     }}
 `}));

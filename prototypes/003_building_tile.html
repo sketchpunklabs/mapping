@@ -1,0 +1,261 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../import-map.js"></script><script type="module">
+// #region IMPORT
+import Starter, { THREE }   from '../lib/Starter.js';
+import MeshUtil             from './lib/MeshUtil.js';
+import fetchAsyncTexture    from './lib/fetchAsyncTexture.js';
+import fetchJson            from './lib/fetchJson.js';
+
+// import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+// import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+
+import { vec2 }             from 'gl-matrix';
+import earcut               from 'earcut';
+// #endregion
+
+// #region MAIN
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 17, 30, 20, [5,0.0,5] ).render();
+
+    // App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    // App.add( (Debug.ln  = new DynLinesMesh() ) );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Get the tile that contains the Empire State Building, New York, USA : -73.985428, 40.748817  :: lon, lat in degrees
+    Ref.tile = new Tile().setLonLat( -73.985428, 40.748817, 15 );
+
+    // Load Raster Tile
+    loadRasterTile( osm_png( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ), [ 0,0.01,0 ] );
+
+    // Load GeoJson of the tile & render all the parts of 1 specific building
+    const buildingID = 'r10872054';
+    const json       = await fetchJson( osmb_json( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ) );    
+    for( let f of json.features ){
+        if( f.properties.building === buildingID ){
+            processFeatureItem( f );
+        }
+    }
+});
+// #endregion
+
+// #region CREATE BUILDING
+
+// TODO: I think height can be computed by just using the 1 / metersPerPixel * TILE_WS_SIZE / TILE_PX_SIZE
+// If I want to avoid building the mesh in meters, then applying a scale to the mesh.
+
+// Create a 3JS Mesh from data from a GeoJson Feature
+function processFeatureItem( json ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if( json.geometry.type !== 'Polygon' ){
+        console.log( 'Can only process Polygon Features', json.id );
+        return;
+    }
+        
+    // TODO: If not exist, can check for minLevel, then * by METERS_PER_LVL
+    const minHeight = ( json.properties.minHeight || 0 );
+
+    // TODO: Same goes for height, check for levels. Also remove Roof Height if 
+    // exists since the extrusion should stop before the specific roof type ( except flat );
+    const height    = ( json.properties.height || 5 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create 2D Mesh Geometry of the polygon
+    const dGeo = polygonGeo( json.geometry.coordinates[0], Ref.tile );
+
+    // Extrude it to make it 3D
+    extrudePolygonGeo( dGeo, height, minHeight );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Threejs Mesh
+    const geo  = MeshUtil.geo( dGeo );
+    const mesh = new THREE.Mesh( geo, new THREE.MeshPhongMaterial( {color:0x00ffff, flatShading:true } ) );
+    App.add( mesh );
+
+    // Create Wireframe mesh
+    const mesh2 = new THREE.Mesh( geo, new THREE.MeshBasicMaterial( {color:0x00aaaa, wireframe:true } ) );
+    App.add( mesh2 );
+
+    // Scale mesh to tile, so reverse the Pixels > Meters then Pixel to Worldspace units
+    const scl = TILE_WS_SIZE / TILE_PX_SIZE;
+    mesh.scale.setScalar( 1 / Ref.tile.metersPerPixel * scl );
+    mesh2.scale.setScalar( 1 / Ref.tile.metersPerPixel * scl );
+}
+
+// Create 2D Mesh Geometry of Feature Polygon
+function polygonGeo( points, tile ){
+    const px       = [0,0];
+    const vertices = [];
+    const scl      = TILE_WS_SIZE / TILE_PX_SIZE;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Convert GeoCoord to Pixel Coordinates in 
+    // relation to Tile's Min Pixel Position
+    for( const p of points ){
+        geo2Pixel( p[0], p[1], 15, px );
+
+        vec2.sub( px, px, tile.minPixelPos );       // Offset to tile's Origin
+        vec2.scale( px, px, tile.metersPerPixel );  // Build the Mesh in Meters
+        vertices.push( px[0], px[1], 0 );           // Earcut doesn't work well on the XZ plane, use XY Plane 
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create triangles from polygon points
+    let indices = earcut( vertices, null, 3 ); // Needs to be in XY Plane
+
+    // Yes, if not clockwise flip triangles.  Issue is the
+    // Y > Z Swop causes the FWD face to point DOWN, we
+    // need the face to point up so need to flip the triangles
+    // when its counter Clockwise on the XY Plane
+    if( !MeshUtil.isVertLoopClockwise( vertices, 2 ) ){
+        MeshUtil.flipTriangleIndices( indices );
+    }
+
+    // Move from XY to XZ Plane
+    MeshUtil.swopYZ( vertices );
+
+    return { vertices, indices };
+}
+
+// Extrude 2D Polygon Mesh
+function extrudePolygonGeo( geo, h, mh=0 ){
+    const fCnt        = geo.vertices.length;
+    const vertCnt     = fCnt / 3;
+    const isClockwise = MeshUtil.isVertLoopClockwise( geo.vertices, 2 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Duplicate face & shift top face up
+    for( let i=0; i < fCnt; i+=3 ){
+        geo.vertices.push( geo.vertices[ i+0 ], mh, geo.vertices[ i+2 ] );
+        geo.vertices[ i+1 ] += h;
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Indices for wall faces of extrusion
+    let a, b, c, d;
+    for( let a=0; a < vertCnt; a++ ){
+        d = ( a+1 ) % vertCnt;
+        b = vertCnt + a;
+        c = vertCnt + d;
+
+        if( isClockwise ) geo.indices.push( a, b, c, c, d, a );
+        else              geo.indices.push( c, b, a, a, d, c );
+    }
+}
+// #endregion
+
+// #region TILE
+
+// Load a Raster tile and assign it to a plane mesh
+async function loadRasterTile( url, pos=[0,0,0] ){
+    console.log( 'LoadUrl', url );
+    const tex = await fetchAsyncTexture( url );
+    const mat = new THREE.MeshBasicMaterial( {map:tex, side:THREE.DoubleSide } );
+    const m   = MeshUtil.quad( mat, TILE_WS_SIZE, true, false );
+
+    m.position.fromArray( pos );
+    App.add( m );
+}
+
+// Basic Data Structure for Tile
+class Tile{
+    metersPerPixel  = 0;
+    lon             = 0;
+    lat             = 0;
+    zoom            = 0;
+    coord           = [0,0];
+    minPixelPos     = [0,0];
+    constructor(){}
+
+    setLonLat( dLon, dLat, zoom ){
+        geo2TileXY( dLon, dLat, zoom, this.coord );
+
+        this.minPixelPos[ 0 ]    = this.coord[0] * TILE_PX_SIZE; //this.minPixelPos[0] + TILE_PX_SIZE;
+        this.minPixelPos[ 1 ]    = this.coord[1] * TILE_PX_SIZE; //this.minPixelPos[1] + TILE_PX_SIZE;
+
+        this.lon                 = dLon;
+        this.lat                 = dLat;
+        this.zoom                = zoom;
+        this.metersPerPixel      = geoMeterPx( dLat, zoom );
+        return this;
+    }
+}
+// #endregion
+
+// #region UTIL
+
+const TAU     = 6.283185307179586;
+const PI_H    = 1.5707963267948966;
+const PI_Q    = 0.7853981633974483;
+const PI_Q3   = 1.5707963267948966 + 0.7853981633974483;
+const PI_270  = Math.PI + 1.5707963267948966;
+const DEG2RAD = 0.01745329251; // PI / 180
+const RAD2DEG = 57.2957795131; // 180 / PI
+const EPSILON = 1e-6;
+
+const METERS_PER_LVL = 3;       // How many meters each building level should have
+const TILE_WS_SIZE   = 10;      // Size of Tile in World Space
+const TILE_PX_SIZE   = 256;     // Size of tile in Pixels
+
+// Convert Geo Coords to Pixel Coords
+function geo2Pixel( dLon, dLat, zoom, out=[0,0] ){
+    const mapSize   = TILE_PX_SIZE << zoom; // Fast double size based on zoom
+    const x         = dLon / 360 + 0.5;
+    let   y         = 0.5 - ( Math.log( Math.tan( PI_Q + PI_H * dLat / 180 ) ) / Math.PI ) / 2;
+    y               = Math.min( 1, Math.max( 0, y ) );
+
+    out[ 0 ] = Math.floor( x * mapSize );
+    out[ 1 ] = Math.floor( y * mapSize );
+
+    return out;
+    // return {
+    //     x: longitude * MAP_SIZE << 0,
+    //     y: latitude  * MAP_SIZE << 0
+    // };
+}
+
+// Convert Geo Coord to Grid Coord
+// https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
+function geo2TileXY( dLon, dLat, zoom, out=[0,0] ){
+    const n    = 2 ** zoom;
+    const rLat = dLat * Math.PI / 180;
+    out[ 0 ]   = Math.floor( n * ( ( dLon + 180 ) / 360 ) ),        
+    out[ 1 ]   = Math.floor( n * ( 1 - Math.log( Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI ) / 2 );
+    return out;
+}
+
+// Convert Tile Grid Coord to Geo Coords
+function tileXY2Geo( x, y, zoom ){
+    //  Given Tile numbers to longitude/latitude :
+    // n = 2 ^ zoom
+    // lon_deg = xtile / n * 360.0 - 180.0
+    // lat_rad = arctan(sinh(π * (1 - 2 * ytile / n)))
+    // lat_deg = lat_rad * 180.0 / 
+}
+
+// Meters per pixel at a zoom
+function geoMeterPx( dLat, zoom ){
+    // https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Resolution_and_Scale
+    // resolution = 156543.03 meters/pixel * cos(latitude) / (2 ^ zoomlevel)
+    return 156543.03 * Math.cos( dLat * DEG2RAD ) / ( 2**zoom );
+}
+
+// #endregion
+
+// #region FREE RASTER TILE PROVIDERS
+function osmb_json( x, y, z ) {
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `http://${sub}.data.osmbuildings.org/0.2/anonymous/tile/${z}/${x}/${y}.json`;
+}
+
+function osm_png( x, y, z ) {
+    const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
+    return `https://${sub}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
+}
+// #endregion
+
+</script></body></html>
