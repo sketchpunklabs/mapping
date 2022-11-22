@@ -249,7 +249,7 @@ function geoMeterPx( dLat, zoom ){
 // #region FREE RASTER TILE PROVIDERS
 function osmb_json( x, y, z ) {
     const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
-    return `http://${sub}.data.osmbuildings.org/0.2/anonymous/tile/${z}/${x}/${y}.json`;
+    return `https://${sub}.data.osmbuildings.org/0.2/anonymous/tile/${z}/${x}/${y}.json`;
 }
 
 function osm_png( x, y, z ) {
