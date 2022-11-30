@@ -19,6 +19,7 @@ window.addEventListener( "load", async _=>{
 
     // Empire State Building, New York, USA : -73.985428, 40.748817  :: lon, lat in degrees
     const tCoord = geo2TileNum( -73.985428, 40.748817, 15 );
+    console.log( 'TileCoord', tCoord );
 
     loadTile( osm_png( tCoord[0], tCoord[1], tCoord[2] ), [ 0,0.5,0 ] );
 
@@ -26,6 +27,8 @@ window.addEventListener( "load", async _=>{
     loadTile( stamen_terrain_jpg( tCoord[0], tCoord[1], tCoord[2] ), [ -1.1,0.5,0 ] );
     loadTile( stamen_watercolor_jpg( tCoord[0], tCoord[1], tCoord[2] ), [ 0,1.6,0 ] );
 
+    loadTile( mapzen_terrarium_png( tCoord[0], tCoord[1], tCoord[2] ), [ -1.1,1.6,0 ] );
+    loadTile( mapzen_normal_png( tCoord[0], tCoord[1], tCoord[2] ), [ 1.1,1.6,0 ] );
 });
 // #endregion
 
@@ -74,6 +77,15 @@ function stamen_watercolor_jpg( x, y, z, dpr=1 ){
     const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
     return `https://stamen-tiles-${sub}.a.ssl.fastly.net/watercolor/${z}/${x}/${y}${dpr >= 2 ? '@2x' : ''}.jpg`;
 }
+
+function mapzen_terrarium_png( x, y, z ){
+    return `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+}
+
+function mapzen_normal_png( x, y, z ){
+    return `https://s3.amazonaws.com/elevation-tiles-prod/normal/${z}/${x}/${y}.png`;
+}
+
 // #endregion
 
 </script></body></html>
