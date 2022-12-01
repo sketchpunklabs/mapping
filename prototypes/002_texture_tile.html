@@ -29,6 +29,8 @@ window.addEventListener( "load", async _=>{
 
     loadTile( mapzen_terrarium_png( tCoord[0], tCoord[1], tCoord[2] ), [ -1.1,1.6,0 ] );
     loadTile( mapzen_normal_png( tCoord[0], tCoord[1], tCoord[2] ), [ 1.1,1.6,0 ] );
+
+    loadTile( arcgis_sat( tCoord[0], tCoord[1], tCoord[2] ), [ 2.2,0.5,0 ] );
 });
 // #endregion
 
@@ -57,6 +59,9 @@ function geo2TileNum( dLon, dLat, zoom ){
 // #endregion
 
 // #region FREE RASTER TILE PROVIDERS
+
+// https://www.trailnotes.org/FetchMap/TileServeSource.html
+
 function osm_png( x, y, z ) {
     const sub = String.fromCharCode( 97 + ( ( x+y+z ) % 3 ) );
     return `https://${sub}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
@@ -86,6 +91,18 @@ function mapzen_normal_png( x, y, z ){
     return `https://s3.amazonaws.com/elevation-tiles-prod/normal/${z}/${x}/${y}.png`;
 }
 
-// #endregion
+function opentopo_png( x, y, z ){
+    return `http://a.tile.opentopomap.org/${z}/${x}/${y}.png`;
+}
+
+
+function usgs_sat( x, y, z ){
+    return `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${y}/${x}`;
+}
+
+function arcgis_sat( x, y, z ){
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}.jpg`;
+}
+// // #endregion
 
 </script></body></html>

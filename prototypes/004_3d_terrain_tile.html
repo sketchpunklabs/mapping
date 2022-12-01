@@ -1,0 +1,247 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../import-map.js"></script><script type="module">
+// #region IMPORT
+import Starter, { THREE }   from '../lib/Starter.js';
+import GridAlternative      from '../lib/meshes/GridAlternative.js';
+
+import MeshUtil             from './lib/MeshUtil.js';
+import fetchImage           from './lib/fetchImage.js';
+import fetchAsyncTexture    from './lib/fetchAsyncTexture.js';
+import CanvasOffscreen      from './lib/CanvasOffscreen.js';
+
+import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+// import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+
+import { vec2, vec3, mat3 }       from 'gl-matrix';
+import earcut               from 'earcut';
+// #endregion
+
+// #region MAIN
+let App;
+let Debug = {};
+let Ref   = { pos:[5, 7, 5]};
+
+/* 
+[[[ INFORMATION ]]]
+https://registry.opendata.aws/terrain-tiles/
+https://elevation-tiles-prod.s3.amazonaws.com/index.html
+https://github.com/tilezen/joerd/blob/master/docs/formats.md
+*/
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 135, 30, 30, [0,0,0] ).render();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup Spotlight for normal testing
+    App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    Debug.pnt.add( [0,0,0], 0xffffff, 10 );
+    Debug.pnt.position.fromArray( Ref.pos );
+    
+    const light = new THREE.PointLight( 0xffffff, 1.5, 20, 2 );
+    light.position.fromArray( Ref.pos );
+    App.add( light );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.tile       = new Tile().setLonLat( -109.887749, 40.252243, 15 );
+    
+    const hMap     = await fetchImage( mapzen_terrarium_png( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ) );
+    const nMap     = await fetchImage( mapzen_normal_png( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ) );
+    const osCanvas = CanvasOffscreen();
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load Raster Tile
+    loadRasterTile( mapzen_terrarium_png( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ), [ -10,0.1,0 ] );
+    loadRasterTile( mapzen_normal_png( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ), [ 0,0.1,-10] );
+    const tMap      = await loadRasterTile( arcgis_sat( Ref.tile.coord[0], Ref.tile.coord[1], Ref.tile.zoom ), [ -10,0.1,-10] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create 3D Terrain Tile
+    const geo       = GridAlternative.geometry( 10, 10, 40, 40, false );
+    const minHeight = applyTerrariumHeightMap( hMap, geo, osCanvas );
+    applyNormalMap( nMap, geo, osCanvas );
+    createMesh( geo, tMap, minHeight )
+});
+// #endregion
+
+// #region HELPERS
+
+// Load a Raster tile and assign it to a plane mesh
+async function loadRasterTile( url, pos=[0,0,0] ){
+    const tex = await fetchAsyncTexture( url );
+    const mat = new THREE.MeshBasicMaterial( {map:tex, side:THREE.DoubleSide } );
+    const m   = MeshUtil.quad( mat, TILE_WS_SIZE, true, false );
+
+    m.position.fromArray( pos );
+    App.add( m );
+    return tex;
+}
+
+// #endregion
+
+
+// #region TILE
+const DEG2RAD        = 0.01745329251; // PI / 180
+const TILE_WS_SIZE   = 10;      // Size of Tile in World Space
+const TILE_PX_SIZE   = 256;     // Size of tile in Pixels
+
+// Basic Data Structure for Tile
+class Tile{
+    metersPerPixel  = 0;
+    lon             = 0;
+    lat             = 0;
+    zoom            = 0;
+    coord           = [0,0];
+    minPixelPos     = [0,0];
+    constructor(){}
+
+    setLonLat( dLon, dLat, zoom ){
+        geo2TileXY( dLon, dLat, zoom, this.coord );
+
+        this.minPixelPos[ 0 ]    = this.coord[0] * TILE_PX_SIZE; //this.minPixelPos[0] + TILE_PX_SIZE;
+        this.minPixelPos[ 1 ]    = this.coord[1] * TILE_PX_SIZE; //this.minPixelPos[1] + TILE_PX_SIZE;
+
+        this.lon                 = dLon;
+        this.lat                 = dLat;
+        this.zoom                = zoom;
+        this.metersPerPixel      = geoMeterPx( dLat, zoom );
+        return this;
+    }
+}
+
+// https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
+function geo2TileXY( dLon, dLat, zoom, out=[0,0] ){
+    const n    = 2 ** zoom;
+    const rLat = dLat * Math.PI / 180;
+    out[ 0 ]   = Math.floor( n * ( ( dLon + 180 ) / 360 ) ),        
+    out[ 1 ]   = Math.floor( n * ( 1 - Math.log( Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI ) / 2 );
+    return out;
+}
+
+// Meters per pixel at a zoom
+function geoMeterPx( dLat, zoom ){
+    // https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Resolution_and_Scale
+    // resolution = 156543.03 meters/pixel * cos(latitude) / (2 ^ zoomlevel)
+    return 156543.03 * Math.cos( dLat * DEG2RAD ) / ( 2**zoom );
+}
+// #endregion
+
+
+// #region TILE MESH
+
+function createMesh( geo, tMap, minHeight ){
+    const bGeo = new THREE.BufferGeometry();
+    bGeo.setIndex( geo.indices );
+    bGeo.setAttribute( 'position',  new THREE.BufferAttribute( new Float32Array( geo.vertices ), 3 ) );
+    bGeo.setAttribute( 'normal',    new THREE.BufferAttribute( new Float32Array( geo.normals ), 3 ) );
+    bGeo.setAttribute( 'uv',        new THREE.BufferAttribute( new Float32Array( geo.texcoord ), 2 ) );
+    // bGeo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh( bGeo, new THREE.MeshPhongMaterial( { side: THREE.DoubleSide, map:tMap } ) );
+    mesh.position.y = -minHeight;
+    App.add( mesh );
+
+    // const mat2 = new THREE.LineBasicMaterial({ color:0xffffff, opacity:0.2, transparent:true });
+    // const wGeo = new THREE.WireframeGeometry( bGeo );
+    // const wire = new THREE.LineSegments( wGeo, mat2 );
+    // wire.position.y = -minHeight;
+    // App.add( wire );
+}
+
+function applyTerrariumHeightMap( hMap, geo, osCanvas ){
+    const vertCnt = geo.vertices.length / 3;
+    let minHeight = Infinity;
+
+    osCanvas.loadImage( hMap );
+    
+    for( let i=0; i < vertCnt; i++ ){
+        const ii  = i * 2;  // UI Index
+        const iii = i * 3;  // Vertex Index
+        const px  = osCanvas.pixelAtUV( geo.texcoord[ ii+0 ], geo.texcoord[ ii+1 ] );
+        const h   = terrariumPixelHeight( px[0], px[1], px[2] );
+
+        minHeight = Math.min( minHeight, h );
+        geo.vertices[ iii+1 ] = h;
+    }
+
+    return minHeight;
+}
+
+function applyNormalMap( nMap, geo, osCanvas ){
+    const vertCnt = geo.vertices.length / 3;
+    const norm    = [0,0,0];
+    // Since its a plane pointing up, Think we can get away with constructing
+    // the TBN Matrix with X = Right, Y = Back, Z = UP. I can be wrong but it 
+    // makes sense when you look out what the axis should be for tangent space
+    const tbn     = [ 1,0,0,  0,0,-1,  0,1,0 ]; 
+    
+    osCanvas.loadImage( nMap );
+
+    for( let i=0; i < vertCnt; i++ ){
+        const ii  = i * 2;
+        const iii = i * 3;
+
+        // Note: GLSL code expects RGB to be normalized but PX data from the canvas
+        // is with ints between 0 to 255. So if using GLSL math, need to normalize
+        // RGB with division of 255.
+        const px  = osCanvas.pixelAtUV( geo.texcoord[ ii+0 ], geo.texcoord[ ii+1 ] );
+
+        // vec3 tx_norm = texture( tex, uv ).xyz * 255.0/127.0 - 128.0/127.0;
+        // normalize( tbn * tx_norm )
+        // norm[ 0 ] = ( px[ 0 ] / 255 ) * 255.0/127.0 - 128.0/127.0;
+        // norm[ 1 ] = ( px[ 1 ] / 255 ) * 255.0/127.0 - 128.0/127.0;
+        // norm[ 2 ] = ( px[ 2 ] / 255 ) * 255.0/127.0 - 128.0/127.0;
+
+        // Simpler version seems to give the same results.
+        norm[ 0 ] = ( px[ 0 ] / 255 ) * 2 - 1;
+        norm[ 1 ] = ( px[ 1 ] / 255 ) * 2 - 1;
+        norm[ 2 ] = ( px[ 2 ] / 255 ) * 2 - 1;
+
+        vec3.transformMat3( norm, norm, tbn );  // Apply TBN to Normal from Texture
+        vec3.normalize( norm, norm );           // Needs to be normalized
+
+        geo.normals[ iii+0 ] = norm[ 0 ];       // Save back to Geometry
+        geo.normals[ iii+1 ] = norm[ 1 ];
+        geo.normals[ iii+2 ] = norm[ 2 ];
+    }
+}
+
+function terrariumPixelHeight( r, g, b ){
+    // https://github.com/tilezen/joerd/blob/master/docs/formats.md
+    // Terrarium Formula : ( r * 256 + g + b / 256 ) - 32768
+
+    /* GLSL
+    float computeTerrariumHeight( vec2 uv, sampler2D tex ){
+        vec4 px = texture( tex, uv );
+
+        // Pixel values are between 0-1, but for Terrarium formula needs to be 0-255
+        px *= 255.0;  // 256.0 doesn't seem to help improve alignment.
+
+        // https://github.com/tilezen/joerd/blob/master/docs/formats.md
+        // Terrarium Formula : ( r * 256 + g + b / 256 ) - 32768
+        return ( px.r * 256.0 +
+                px.g +
+                px.b / 256.0 ) - 32768.0;
+    }
+    */
+    return ( r * 256.0 + g + b / 256.0 ) - 32768.0;
+}
+
+// #endregion
+
+
+// #region FREE RASTER TILE PROVIDERS
+function mapzen_terrarium_png( x, y, z ){
+    return `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+}
+
+function mapzen_normal_png( x, y, z ){
+    return `https://s3.amazonaws.com/elevation-tiles-prod/normal/${z}/${x}/${y}.png`;
+}
+
+function arcgis_sat( x, y, z ){
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}.jpg`;
+}
+// #endregion
+
+</script></body></html>
