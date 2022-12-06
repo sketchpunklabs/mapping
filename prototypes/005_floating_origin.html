@@ -1,0 +1,253 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../import-map.js"></script><script type="module">
+// #region IMPORT
+import Starter, { THREE }   from '../lib/Starter.js';
+import GridAlternative      from '../lib/meshes/GridAlternative.js';
+
+// import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+// import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+
+import noise     from '../lib/thirdparty/perlin.js';
+import { vec2, vec3, mat3 } from 'gl-matrix';
+
+// #endregion
+
+/*
+NOTES
+1. Fix any mesh so its vertices are in relation to its centroid.
+
+2. Use the centroid as the position for the mesh itself.
+
+3. Since CPUs can handle large floats instead of GPUs, if we compute
+the ViewMatrix and ModelMatrix then combind them as a modelViewMatrix
+the the VERY large translations of the two will cancel out creating the
+perfect model offset in view space that has small float values. Passing
+the resulting matrix to the shader will then properly offset the 'localspace'
+model into the right location in 'viewspace'
+
+4. Any lighting MUST be done in view space cordinates.
+*/
+
+// #region MAIN
+let App;
+let Debug = {};
+let Ref   = { 
+    target:[ 1_000_000,1_000_000,1_000_000 ],
+    offset:[ 0,7,14 ],
+};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 30, 40, [0,0,0] ).render();
+
+    const target = vec3.add( [], Ref.target, [5,0,0] );
+    App.camera.position.fromArray( vec3.add( [], target, Ref.offset ) );
+    App.orbit.target.fromArray( target );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const aGeo    = createInitalGeo();           // Vertices in World Space
+    const aMesh   = createMesh( aGeo );
+
+    const bGeo    = cloneGeo( aGeo );            // Make a copy to transform the data
+    const bOrigin = toGeoLocalSpace( bGeo );     // Transform Vertices in relation to its centroid.
+    const bMesh   = createMesh( bGeo, customMaterial( 0x00ffff, true ) );
+    bMesh.position.fromArray( bOrigin );
+    bMesh.position.x += 11;
+
+    /*
+    // Validating Math
+    App.camera.updateMatrixWorld();
+    console.log( "cw", App.camera.matrixWorld.elements[12], App.camera.matrixWorld.elements[13], App.camera.matrixWorld.elements[14] );
+    console.log( "ci", App.camera.matrixWorldInverse.elements[12], App.camera.matrixWorldInverse.elements[13], App.camera.matrixWorldInverse.elements[14] );
+    bMesh.updateMatrixWorld( true );
+    console.log( 'mb', bMesh.matrixWorld.elements[12], bMesh.matrixWorld.elements[13], bMesh.matrixWorld.elements[14] );
+
+    const m = new THREE.Matrix4();
+    m.multiplyMatrices( App.camera.matrixWorldInverse, bMesh.matrixWorld );
+    console.log( 't', m.elements[12], m.elements[13], m.elements[14] );
+    */
+});
+// #endregion
+
+function createInitalGeo(){
+    const HIGHT     = 2;
+    const FREQ      = 0.5;
+    const CELLS     = 20; 
+    const geo       = GridAlternative.geometry( 10, 10, CELLS, CELLS, true );
+    const vertCnt   = geo.vertices.length / 3;
+    const SIZE      = CELLS + 1;
+
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+
+    for( let i=0; i < vertCnt; i++ ){
+        let y = Math.floor( i / SIZE );
+        let x = i - y * SIZE;
+        let n = noise.perlin2( x * FREQ, y * FREQ );
+
+        geo.vertices[ i*3 + 1 ] = n * HIGHT + Ref.target[ 1 ];
+        geo.vertices[ i*3 + 0 ] += Ref.target[ 0 ];
+        geo.vertices[ i*3 + 2 ] += Ref.target[ 2 ];
+
+        // cx += geo.vertices[ i*3 + 0 ];
+        // cy += geo.vertices[ i*3 + 1 ];
+        // cz += geo.vertices[ i*3 + 2 ];
+    }
+    
+    // console.log( 'origin', cx/vertCnt, cy/vertCnt, cz/vertCnt );
+    return geo;
+}
+
+
+function cloneGeo( geo ){
+    return {
+        indices  : geo.indices,
+        normals  : geo.normals,
+        texcoord : geo.texcoord,
+        vertices : new Float32Array( geo.vertices ),
+    }
+}
+
+function toGeoLocalSpace( geo ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Compute centroid of Mesh tile
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for( let i=0; i < geo.vertices.length; i+=3 ){
+        cx += geo.vertices[ i+0 ];
+        cy += geo.vertices[ i+1 ];
+        cz += geo.vertices[ i+2 ];
+    }
+
+    // Average out to get central point
+    const vcnt = geo.vertices.length / 3;
+    cx /= vcnt;
+    cy /= vcnt;
+    cz /= vcnt;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Offset vertices by centroid
+    for( let i=0; i < geo.vertices.length; i+=3 ){
+        geo.vertices[ i+0 ] -= cx;
+        geo.vertices[ i+1 ] -= cy;
+        geo.vertices[ i+2 ] -= cz;
+    }
+
+    return [cx,cy,cz];
+}
+
+function createMesh( geo, mat=null ){
+    const bGeo = new THREE.BufferGeometry();
+    bGeo.setIndex( geo.indices );
+    bGeo.setAttribute( 'position',  new THREE.BufferAttribute( new Float32Array( geo.vertices ), 3 ) );
+    bGeo.setAttribute( 'normal',    new THREE.BufferAttribute( new Float32Array( geo.normals ), 3 ) );
+    bGeo.setAttribute( 'uv',        new THREE.BufferAttribute( new Float32Array( geo.texcoord ), 2 ) );
+
+    const mesh = new THREE.Mesh( bGeo, mat || new THREE.MeshPhongMaterial( { color:0x00ffff, side: THREE.DoubleSide, flatShading:true } ) );
+    App.add( mesh );
+
+
+    // mesh.onBeforeRender = ()=>{
+    //     console.log( mesh.modelViewMatrix.elements[12], mesh.modelViewMatrix.elements[13], mesh.modelViewMatrix.elements[14] );
+    // }
+    // const mat2 = new THREE.LineBasicMaterial({ color:0xffffff, opacity:0.2, transparent:true });
+    // const wGeo = new THREE.WireframeGeometry( bGeo );
+    // const wire = new THREE.LineSegments( wGeo, mat2 );
+    // App.add( wire );
+    // return wire;
+
+    return mesh;
+}
+
+function customMaterial( baseColor=0xa0a0a0, useLowPoly=true ){
+        const mat = new THREE.RawShaderMaterial({
+            depthTest       : true,
+            // transparent 	: true, 
+            side         : THREE.DoubleSide,
+            // lights       : true,
+    
+            uniforms        : { 
+                color   : { type :'vec3', value:new THREE.Color( baseColor ) },
+                color_x : { type :'vec3', value:new THREE.Color( "#878FA3" ) }, // Each axis gets a Grayscaled Value, used as strength of baseColor
+                color_y : { type :'vec3', value:new THREE.Color( "#ffffff" ) }, // these don't really need to be modified unless looking to change 
+                color_z : { type :'vec3', value:new THREE.Color( "#CED4E0" ) }, // the overall strength of each axis
+            },
+    
+            extensions      : { 
+                derivatives : true
+            },
+    
+            vertexShader    : `#version 300 es
+            in	vec3    position;
+            in  vec3    normal;
+            in	vec2    uv;
+            
+            uniform     mat4    modelViewMatrix;
+            uniform     mat4    modelMatrix;
+            uniform     mat4    viewMatrix;
+            uniform     mat4    projectionMatrix;
+    
+            out vec3    fragVPos;  // View Space Position
+            out vec3    fragNorm;
+            out vec2    fragUV;
+            
+            void main(){
+                // vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+                // vec4 vPos           = viewMatrix * wPos;                    // View Space
+                vec4 vPos           = modelViewMatrix * vec4( position, 1.0 ); // View Space Too
+                
+                fragUV              = uv;
+                fragVPos            = vPos.xyz;
+                fragNorm            = ( modelViewMatrix * vec4( normal, 0.0 ) ).xyz;
+    
+                gl_Position         = projectionMatrix * vPos;
+            }`,
+    
+            fragmentShader  : `#version 300 es
+            precision mediump float;
+            
+            ${ ( useLowPoly )? '#define LOWPOLY':'' }
+
+            uniform vec3 color;
+            uniform vec3 color_x;
+            uniform vec3 color_y;
+            uniform vec3 color_z;
+    
+            in  vec3    fragVPos;
+            in  vec3    fragNorm;
+            in  vec2    fragUV;
+            out vec4    outColor;
+    
+            // #####################################################################
+            void main(){
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                #ifndef LOWPOLY
+                    vec3 norm = normalize( fragNorm ); // Normals From Mesh
+                #else
+                    // Create normals using derivitive functions. Makes things look low poly
+                    vec3 norm = normalize( cross( dFdx( fragVPos ), dFdy( fragVPos ) ) );
+                #endif
+
+                // Treating normal as Light Strength, it curves the progression from dark to light
+                // if left as is, it gives the tint lighting much more strength and also linear progression
+                norm = norm * norm; 
+        
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                // From what I understand of how this works is by applying a Lighting Color for Each axis direction.
+                // Then using the normal direction to blend each axis color together. From kenny's image example, he
+                // setup the brightest color to come from Y, Second from Z then the darkest color at X.
+                vec3 out_color;
+                out_color = mix( color, color * color_x, norm.x );
+                out_color = mix( out_color, color * color_y, norm.y );
+                out_color = mix( out_color, color * color_z, norm.z );
+                outColor  = vec4( out_color, 1.0 );
+            }`
+        });
+    
+        return mat;
+    }
+
+
+</script></body></html>
