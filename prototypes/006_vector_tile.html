@@ -1,0 +1,444 @@
+<!DOCTYPE html><html><head><title></title></head><body>
+<script src="https://cdn.jsdelivr.net/npm/protobufjs@7.X.X/dist/protobuf.js"></script>    
+<script src="../import-map.js"></script><script type="module">
+// #region IMPORT
+import Starter, { THREE }   from '../lib/Starter.js';
+import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+
+import fetchArrayBuffer     from './lib/fetchArrayBuffer.js';
+import MeshUtil             from './lib/MeshUtil.js';
+import earcut               from '../lib/thirdparty/earcut.js';
+import { vec2, vec3 }       from 'gl-matrix';
+// #endregion
+
+// #region NOTES
+/*
+http://mapbox.github.io/vector-tile-spec/
+https://github.com/mapcherry/vt-pbf-viewer
+https://github.com/mapbox/vector-tile-spec/blob/master/2.1/vector_tile.proto
+https://github.com/protobufjs/protobuf.js#using-proto-files
+
+https://basisvisualisierung.niedersachsen.de/
+https://basisvisualisierung.niedersachsen.de/services/basiskarte/v2/tiles/13/4317/2693.pbf
+https://basisvisualisierung.niedersachsen.de/services/basiskarte/styles/vt-style-color.json
+
+https://api.pdok.nl/lv/bgt/ogc/v0_1/tiles/NetherlandsRDNewQuad/{z}/{x}/{y}.pbf
+https://api.pdok.nl/lv/bgt/ogc/v0_1/tiles/NetherlandsRDNewQuad/12/1864/2089.pbf
+https://app.pdok.nl/vectortile-viewer/
+
+https://www.rfc-editor.org/rfc/rfc7946#section-3.1.4
+*/
+// #endregion
+
+// #region MAIN
+let App;
+let Debug = {};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true } );
+    App.setCamera( 0, 50, 15, [0,0,0] ).render();
+
+    App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    Debug.ln.add( [0,0.01,0], [0,0.01,5], 0xffffff );
+    Debug.ln.add( [0,0.01,5], [5,0.01,5], 0xffffff );
+    Debug.ln.add( [5,0.01,5], [5,0.01,0], 0xffffff );
+    Debug.ln.add( [5,0.01,0], [0,0.01,0], 0xffffff );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const url = 'https://basisvisualisierung.niedersachsen.de/services/basiskarte/v2/tiles/13/4317/2693.pbf';
+    // const url = 'https://api.pdok.nl/lv/bgt/ogc/v0_1/tiles/NetherlandsRDNewQuad/12/1864/2089.pbf';
+
+    const pTile = await fetchPbf( url );
+    renderTile( pTile );
+});
+// #endregion
+
+// #region HELPERS
+
+const GeomType = {
+    UNKNOWN     : 0,
+    POINT       : 1,
+    LINESTRING  : 2,
+    POLYGON     : 3,
+};
+
+async function fetchPbf( url ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Download PBF File
+    const aryBuf  = await fetchArrayBuffer( url );  // Download Binary Data
+    const uintBuf = new Uint8Array( aryBuf );       // Protobuf needs ArrayBuffer wrapped as a Uint8Array ( ByteArray )
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load in Vector Tile Proto File
+    const proto     = await protobuf.load( '../lib/thirdparty/vector_tile_v2_1.proto' );    // Load file
+    const protoTile = proto.lookupType( 'vector_tile.Tile' );                               // Get Tile Definition ???
+    const err       = protoTile.verify( uintBuf );                                          // Validate Pbf Binary
+    if( err ){
+        console.error( 'Error verifying PBF data' );
+        return null;
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Deserialize binary to objects
+    const cls = protoTile.decode( uintBuf )
+    // const obj = protoTile.toObject( cls ); // dont really need to convert to JSON object, can just use the deserialized class object
+    return cls;
+}
+
+// #endregion
+
+// #region RENDERING
+
+function renderTile( ptile ){
+    const GL_TILE_SIZE = 5;
+    let geo, size, scl = 1;
+
+    let tmp = 0;
+    for( let layer of ptile.layers ){
+        // console.log( layer );
+        size = layer.extent;         // Size of vector tile
+        scl  = GL_TILE_SIZE / size;  // Scale Vector Tile to GL Tile
+        
+        for( let feat of layer.features ){
+            
+            switch( feat.type ){
+                case GeomType.POINT:
+                    geo = parseGeometry( feat.geometry );
+                    renderPoint( geo, scl );
+                    break;
+
+                case GeomType.LINESTRING:
+                    geo = parseGeometry( feat.geometry );
+                    renderLineString( geo, scl );
+                    break;
+
+                case GeomType.POLYGON:
+                    geo = parseGeometry( feat.geometry );
+                    renderPolygon( geo, scl );
+                    // tmp ++;
+                    // if( tmp > 200 ) return;
+                    break;
+            }
+        }
+    }
+
+}
+
+
+function renderLineString( geo, scl ){
+    const a = [0,0,0];
+    const b = [0,0,0];
+    for( let line of geo ){
+
+        a[ 0 ] = line[ 0 ] * scl;
+        a[ 2 ] = line[ 1 ] * scl;
+
+        for( let i=2; i < line.length; i+=2 ){
+            b[ 0 ] = line[ i+0 ] * scl;
+            b[ 2 ] = line[ i+1 ] * scl;
+
+            Debug.ln.add( a, b, 0x00ff00 );
+            vec3.copy( a, b );
+        }
+    }
+}
+
+
+function renderPoint( geo, scl ){
+    const a = [0,0,0];
+    for( let line of geo ){
+        a[ 0 ] = line[ 0 ] * scl;
+        a[ 2 ] = line[ 1 ] * scl;
+        Debug.pnt.add( a, 0xffff00, 5 );
+    }
+}
+
+
+function polygon2DArea( points, isClosed=true ) {
+    let cnt  = points.length / 2;
+    let iEnd = ( isClosed )? cnt - 1 : cnt;
+    let det  = 0;
+    let j, jj;
+    for( let i = 0; i < iEnd; i++ ){
+        j    = i * 2;
+        jj   = ( ( i+1 ) % cnt ) * 2;
+        det += points[ j+0 ] * points[ jj+1 ] - points[ j+1 ] * points[ jj+0 ];
+    }
+    return det / 2; // If I only care about winding, can remove division
+}
+
+
+function renderPolygon( geo, scl ){
+    let line;
+    let area;
+    let iEnd;
+    let pnts;
+    let indices;
+    let vertices;
+
+    for( let i=0; i < geo.length; i++ ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        line    = geo[ i ];
+        area    = polygon2DArea( line );
+
+        // TODO: When can determine color for each polygon then this won't be needed
+        // Hack to limit large polygons from rendering
+        if( Math.abs( area ) > 100_000 ) continue;
+
+        // TODO: Add support for polygons with holes in them
+        // The winding direction is opposite for holes, should be negative
+        if( area < 0 ){ console.log( 'Skipping Polygon Holes' ); continue; }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Strip out the last point if its a repeat of the first, this denotes a closed
+        // polygon but for earcut to work right we need to get rid of that closing point.
+        // earcut automatically assumes all polygons are closed
+        iEnd = line.length - 1;
+        pnts = ( line[0] === line[iEnd-1] && line[1] === line[iEnd] )? 
+            line.slice( 0, iEnd-1 ) :  // Strip last point
+            line.slice(); 
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute Triangles, Flip them if they are CW
+        indices  = earcut( pnts, null, 2 );
+        if( Math.abs( area ) >= 0 ) MeshUtil.flipTriangleIndices( indices ); // Flip Winding to CCW
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Convert 2D Points to 3D points then apply tile scale
+        vertices = [];
+        for( let j=0; j < pnts.length; j+=2 ){
+            vertices.push( pnts[j+0]* scl , 0, pnts[j+1] * scl );
+        }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Generate Mesh
+        // TODO: Ideally better to create just 1 mesh for all polygons
+        // or create meshes for different types of polygons like land, water, etc.
+        const bGeo = MeshUtil.geo( { indices, vertices } );
+        const mesh = new THREE.Mesh( bGeo, new THREE.MeshBasicMaterial( { color:0x909090, } ) ); // side: THREE.DoubleSide
+        App.add( mesh );
+    }
+}
+
+// #endregion
+
+// #region PARSING FEATURE GEOMETRY
+
+const GEOCMD = {
+    MoveTo  : 1,
+    LineTo  : 2,
+    CloseTo : 7,
+};
+
+// https://github.com/mapbox/vector-tile-spec/tree/master/2.1#432-parameter-integers
+function paramInt( v ){ return ( v >> 1 ) ^ ( -( v & 1 ) ); }
+
+// https://github.com/mapbox/vector-tile-spec/tree/master/2.1#43-geometry-encoding
+// https://github.com/mapbox/vector-tile-js/blob/master/lib/vectortilefeature.js
+
+
+/* TEST EXAMPLE FROM SPEC, can use this to make sure parsing is working.
+
+MultiLINE
+geo = [ 9, 4, 4, 18, 0, 16, 16, 0, 9, 17, 17, 10, 4, 8 ];
+
+MoveTo(+2,+2)
+LineTo(+0,+8)
+LineTo(+8,+0)
+MoveTo(-9,-9)
+LineTo(+2,+4)
+
+Line 1:
+    (2,2)
+    (2,10)
+    (10,10)
+Line 2:
+    (1,1)
+    (3,5)
+
+-----------------------------------------------------
+4.3.5.6. Example Multi Polygon
+An example of a more complex encoding of two polygons, one with a hole. The position of the points for the 
+polygons are shown below. The winding order of the polygons is VERY important in this example as it signifies 
+the difference between interior rings and a new polygon.
+
+geo = [ 9, 0, 0, 26, 20, 0, 0, 20, 19, 0, 15, 9, 22, 2, 26, 18, 0, 0, 18, 17, 0, 15, 9, 4, 13, 26, 0, 8, 8, 0, 0, 7, 15, ];
+MoveTo(+0,+0)
+LineTo(+10,+0)
+LineTo(+0,+10)
+LineTo(-10,+0) // Cursor at 0,10 after this command
+ClosePath // End of Polygon 1
+
+MoveTo(+11,+1) // NOTE THAT THIS IS RELATIVE TO LAST LINETO!
+LineTo(+9,+0)
+LineTo(+0,+9)
+LineTo(-9,+0) // Cursor at 11,20 after this command
+ClosePath // This is a new polygon because area is positive!
+
+MoveTo(+2,-7) // NOTE THAT THIS IS RELATIVE TO LAST LINETO!
+LineTo(+0,+4)
+LineTo(+4,+0)
+LineTo(+0,-4) // Cursor at 17,13
+ClosePath // This is an interior ring because area is negative!
+
+Polygon 1:
+    Exterior Ring:
+    (0,0)
+    (10,0)
+    (10,10)
+    (0,10)
+    (0,0) Path Closing as Last Point
+
+Polygon 2:
+    Exterior Ring:
+    (11,11)
+    (20,11)
+    (20,20)
+    (11,20)
+    (11,11) Path Closing as Last Point
+
+    Interior Ring:
+    (13,13)
+    (13,17)
+    (17,17)
+    (17,13)
+    (13,13) Path Closing as Last Point
+*/
+
+function parseGeometry( geo ){
+    const lines = [];
+    let line    = null;
+    let i       = 0;
+    let iEnd    = geo.length;
+    let cmd     = 0;
+    let cmdLen  = 0;
+    let x       = 0;
+    let y       = 0;
+    let xp      = 0;
+    let yp      = 0;
+    let v       = 0;
+
+    while( i < iEnd ){
+        // If out of command parameters, compute next command instruction
+        if( cmdLen <= 0 ){
+            // https://github.com/mapbox/vector-tile-spec/tree/master/2.1#431-command-integers
+            v      = geo[ i++ ];
+            cmd    = v & 0x7;  // Parse out Command
+            cmdLen = v >> 3;   // How many points to run on this command
+
+            //console.log( 'COMMAND', cmd, cmdLen );
+        }
+        
+        cmdLen--;
+        switch( cmd ){
+            case GEOCMD.MoveTo:
+            case GEOCMD.LineTo:
+                xp = paramInt( geo[ i++ ] );    // Parse out this ZigZag Value thingy
+                yp = paramInt( geo[ i++ ] );    // That acts like a continuous appending offset
+                x  += xp;                       // Append offsets for next point
+                y  += yp;
+
+                // if a moveto command, start a new line
+                if( cmd === GEOCMD.MoveTo ){
+                    if( line ) lines.push( line );
+                    line = [];
+                    // console.log( 'MOVETO' );
+                } //else console.log( 'LINETO' );
+
+                line.push( x, y );
+                // console.log( '-- XY', x, y, 'PARAM', xp, yp );
+            break;
+
+            case GEOCMD.CloseTo:
+                if( line ) line.push( line[0], line[1] ); // Close polygon by copying the first point
+                // console.log( 'CLOSETO' );
+            break;
+        }
+    }
+
+    if( line ) lines.push( line );
+
+    return lines;
+}
+
+// #endregion
+
+// #region TILE
+const DEG2RAD        = 0.01745329251; // PI / 180
+const TILE_WS_SIZE   = 10;      // Size of Tile in World Space
+const TILE_PX_SIZE   = 256;     // Size of tile in Pixels
+
+// Basic Data Structure for Tile
+class Tile{
+    metersPerPixel  = 0;
+    lon             = 0;
+    lat             = 0;
+    zoom            = 0;
+    coord           = [0,0];
+    minPixelPos     = [0,0];
+    constructor(){}
+
+    setTileCoord( x, y, zoom ){
+        const lonlat          = tileXY2Geo( x, y, zoom );
+
+        this.coord[ 0 ]       = x;
+        this.coord[ 1 ]       = y;
+        this.minPixelPos[ 0 ] = x * TILE_PX_SIZE;
+        this.minPixelPos[ 1 ] = y * TILE_PX_SIZE; 
+
+        this.lon              = lonlat[ 0 ];
+        this.lat              = lonlat[ 1 ];
+        this.zoom             = zoom;
+        this.metersPerPixel   = geoMeterPx( lonlat[ 1 ], zoom );
+        return this;
+    }
+
+    setLonLat( dLon, dLat, zoom ){
+        geo2TileXY( dLon, dLat, zoom, this.coord );
+
+        this.minPixelPos[ 0 ]    = this.coord[0] * TILE_PX_SIZE; //this.minPixelPos[0] + TILE_PX_SIZE;
+        this.minPixelPos[ 1 ]    = this.coord[1] * TILE_PX_SIZE; //this.minPixelPos[1] + TILE_PX_SIZE;
+
+        this.lon                 = dLon;
+        this.lat                 = dLat;
+        this.zoom                = zoom;
+        this.metersPerPixel      = geoMeterPx( dLat, zoom );
+        return this;
+    }
+}
+
+// https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
+function geo2TileXY( dLon, dLat, zoom, out=[0,0] ){
+    const n    = 2 ** zoom;
+    const rLat = dLat * Math.PI / 180;
+    out[ 0 ]   = Math.floor( n * ( ( dLon + 180 ) / 360 ) ),        
+    out[ 1 ]   = Math.floor( n * ( 1 - Math.log( Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI ) / 2 );
+    return out;
+}
+
+// Convert Tile Grid Coord to Geo Coords
+function tileXY2Geo( x, y, zoom, out=[0,0] ){
+    const n       = 2 ** zoom;
+    const yn      = Math.PI - ( 2 * Math.PI * y ) / n;
+    const lat_rad = Math.atan( 0.5 * ( Math.exp( yn ) - Math.exp( -yn ) ) );
+    const lat_deg = lat_rad * 180 / Math.PI;
+    const lon_deg = x / n * 360.0 - 180.0;
+
+    out[ 0 ]      = lon_deg;
+    out[ 1 ]      = lat_deg;
+    return out;
+}
+
+// Meters per pixel at a zoom
+function geoMeterPx( dLat, zoom ){
+    // https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Resolution_and_Scale
+    // resolution = 156543.03 meters/pixel * cos(latitude) / (2 ^ zoomlevel)
+    return 156543.03 * Math.cos( dLat * DEG2RAD ) / ( 2**zoom );
+}
+// #endregion
+
+</script></body></html>
