@@ -1,0 +1,185 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../lib/Starter.js';
+import GridAlternative      from '../lib/meshes/GridAlternative.js';
+import noise                from '../lib/thirdparty/perlin.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true } );
+    App.setCamera( -45, 45, 18 ).render();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mesh = createMesh( createGeo(), customMaterial() );
+});
+
+function createGeo(){
+    const HIGHT     = 3;
+    const FREQ      = 0.2;
+    const CELLS     = 20; 
+    const geo       = GridAlternative.geometry( 10, 10, CELLS, CELLS, true );
+    const vertCnt   = geo.vertices.length / 3;
+    const SIZE      = CELLS + 1;
+
+    for( let i=0; i < vertCnt; i++ ){
+        let y = Math.floor( i / SIZE );
+        let x = i - y * SIZE;
+        let n = noise.perlin2( x * FREQ, y * FREQ );
+
+        geo.vertices[ i * 3 + 1 ] = n * HIGHT;
+    }
+
+    return geo;
+}
+
+function createMesh( geo, mat=null ){
+    const bGeo = new THREE.BufferGeometry();
+    bGeo.setIndex( geo.indices );
+    bGeo.setAttribute( 'position',  new THREE.BufferAttribute( new Float32Array( geo.vertices ), 3 ) );
+    bGeo.setAttribute( 'normal',    new THREE.BufferAttribute( new Float32Array( geo.normals ), 3 ) );
+    bGeo.setAttribute( 'uv',        new THREE.BufferAttribute( new Float32Array( geo.texcoord ), 2 ) );
+
+    const mesh = new THREE.Mesh( bGeo, mat || new THREE.MeshPhongMaterial( { color:0x00ffff, side: THREE.DoubleSide, flatShading:true } ) );
+    App.add( mesh );
+
+
+    // mesh.onBeforeRender = ()=>{
+    //     console.log( mesh.modelViewMatrix.elements[12], mesh.modelViewMatrix.elements[13], mesh.modelViewMatrix.elements[14] );
+    // }
+    // const mat2 = new THREE.LineBasicMaterial({ color:0xffffff, opacity:0.2, transparent:true });
+    // const wGeo = new THREE.WireframeGeometry( bGeo );
+    // const wire = new THREE.LineSegments( wGeo, mat2 );
+    // App.add( wire );
+    // return wire;
+
+    return mesh;
+}
+
+// https://twitter.com/EthanRedd
+// https://threejs.org/examples/?q=bloom#webgl_postprocessing_unreal_bloom_selective
+// https://github.com/mrdoob/three.js/blob/master/examples/webgl_postprocessing_unreal_bloom_selective.html
+// https://discourse.threejs.org/t/how-to-use-bloom-effect-not-for-all-object-in-scene/24244/20
+// https://codepen.io/prisoner849/pen/LYLrawm
+
+function customMaterial(){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'Topographic', 
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true,
+        alphaToCoverage : false,
+
+        uniforms        : { 
+            // texCube : { type :'samplerCube', value: texCube },
+            // tiling  : { type :'vec2', value:[1,1] },
+            // offset  : { type :'vec2', value:[0,0] },
+        },
+
+        extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        // uniform samplerCube texCube;
+        // uniform float uDepth;
+        // uniform vec2 tiling;
+        // uniform vec2 offset;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+        vec3 rgb( int c ){
+            return vec3(
+                float( ( c >> 16 ) & 0xff ) * 0.00392156863,
+                float( ( c >> 8 ) & 0xff ) * 0.00392156863,
+                float( c & 0xff ) * 0.00392156863
+            );
+        }
+
+        vec3 rampGradient( vec3[6] color, float[6] wgt, float t, int i ){
+            for( i; i > 0; i-- ){
+                if( wgt[ i ] <= t ){
+                    return mix( 
+                        color[ i-1 ], 
+                        color[ i ],
+                        smoothstep( wgt[ i-1 ], wgt[ i ], t )   // Remap T between A & B
+                    );
+                }
+            }
+            return color[ 0 ];
+        }
+
+        // #####################################################################
+        void main(){
+            outColor        = vec4( 1.0, 0.0, 0.0, 1.0 );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // COMPUTE TOPOGRAPHIC CONTOUR MASK
+            float hRange    = 3.0;
+            float ySize     = 0.15;  // Level size
+            float oddStep   = 6.0;   // How many levels to find ODD one
+            float halfRng   = 0.15;  // Half Range for thick lines
+            float thinness  = 0.01;
+
+            float yGrid     = fragWPos.y / ySize;   // Setup level coord for y
+            float yFrac     = fract( yGrid );       // Get the level height
+            float yMid      = abs( yFrac - 0.5 );   // Shift gradient to the start of each level
+            float yFW       = fwidth( yGrid );      // Derivitive of Y
+
+            // Find if the cell is the odd man out, 1 = Yes
+            float fOdd      = 1.0 - step( 0.1, mod( floor( yGrid ), oddStep ) );
+
+            float maskA     = 1.0 - ( ( yMid - yFW * thinness ) / yFW );        // Thin Line
+            float maskB     = 1.0 - smoothstep( halfRng, halfRng + yFW, yMid ); // Thick Line
+
+            float mask      = maskA + maskB * fOdd; // Only show thick lines if its the odd level
+
+            outColor.rgba = vec4( mask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // COLORIZE
+
+            vec3  rpColor[6]    = vec3[]( rgb(0x0f1b1f), rgb(0x0da3a3), rgb(0xffff00), rgb(0x00ff00), rgb(0xffffff), rgb(0xffffff) );
+            float rpWeight[6]   = float[]( 0.41, 0.44, 0.5, 0.53, 0.67, 0.9 );
+            float t             = ( fragWPos.y + hRange ) / ( hRange * 2.0 );
+            
+            outColor.rgb        = rampGradient( rpColor, rpWeight, t, 4 );  // Color Lines
+            outColor.rgb        = mix( vec3(0.0), outColor.rgb, mask );     // Mix Black with Color using mask
+            outColor.a          = max( 0.8, mask );                         // Limit transparency  
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
