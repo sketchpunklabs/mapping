@@ -1,3 +1,20 @@
+https://www.rfc-editor.org/rfc/rfc7946#page-6
+
+https://osmbuildings.org/documentation/data/
+https://www.mapzen.com/blog/getting-crafty/
+
+
+https://github.com/tangrams/tangram  vector and 3d buildings
+https://github.com/kekscom/osmbuildings 2.5 Maps & 3d buildings
+https://github.com/OSMBuildings/OSMBuildings WebGL Viewer
+
+
+Which gives us a formula to calculate resolution at any given zoom:
+resolution = 156543.03 meters/pixel * cos(latitude) / (2 ^ zoomlevel)
+
+Some applications need to know a map scale, that is, how 1 cm on a screen translates to 1 cm of a map.
+scale = 1 : (screen_dpi * 1/0.0254 in/m * resolution)
+
 
 // size = tileSize * Math.pow( 2, zoom );
 
@@ -29,3 +46,109 @@ n = 2 ^ zoom
 lon_deg = xtile / n * 360.0 - 180.0
 lat_rad = arctan(sinh(π * (1 - 2 * ytile / n)))
 lat_deg = lat_rad * 180.0 / 
+
+////////////////////////////////////////////////////////////////////////
+Example for calculating number of tiles within given extent and zoom-level:
+ function lon2tile(lon,zoom) { return (Math.floor((lon+180)/360*Math.pow(2,zoom))); }
+ function lat2tile(lat,zoom)  { return (Math.floor((1-Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180))/Math.PI)/2 *Math.pow(2,zoom))); }
+
+Inverse process:
+
+ function tile2long(x,z) {
+  return (x/Math.pow(2,z)*360-180);
+ }
+ function tile2lat(y,z) {
+  var n=Math.PI-2*Math.PI*y/Math.pow(2,z);
+  return (180/Math.PI*Math.atan(0.5*(Math.exp(n)-Math.exp(-n))));
+ }
+
+var zoom        = 9;
+var top_tile    = lat2tile(north_edge, zoom); // eg.lat2tile(34.422, 9);
+var left_tile   = lon2tile(west_edge, zoom);
+var bottom_tile = lat2tile(south_edge, zoom);
+var right_tile  = lon2tile(east_edge, zoom);
+var width       = Math.abs(left_tile - right_tile) + 1;
+var height      = Math.abs(top_tile - bottom_tile) + 1;
+
+// total tiles
+var total_tiles = width * height; // -> eg. 377
+
+
+////////////////////////////////////////////////////////////////////////
+class Tile {
+
+  constructor (x, y, zoom) {
+    this.x = x;
+    this.y = y;
+    this.zoom = zoom;
+    this.key = [x, y, zoom].join(',');
+
+    this.distance = Infinity;
+  }
+
+  // parent () {
+  //   return {
+  //     x: this.x / 2,
+  //     y: this.y / 2,
+  //     z: this.zoom - 1
+  //   };
+  // }
+
+  // children () {
+  //   return [
+  //     { x: this.x * 2,     y: this.y * 2,     z: this.zoom + 1 },
+  //     { x: this.x * 2 + 1, y: this.y * 2,     z: this.zoom + 1 },
+  //     { x: this.x * 2,     y: this.y * 2 + 1, z: this.zoom + 1 },
+  //     { x: this.x * 2 + 1, y: this.y * 2 + 1, z: this.zoom + 1 }
+  //   ];
+  // }
+
+
+https://observablehq.com/@sw1227/calculating-pixel-size-m-of-map-tile
+  // Calculate lat/lon of pixel (pX, pY) on tile tileZ/tileX/tileY
+function pixelOnTileToLatLon(pX, pY, tileZ, tileX, tileY) {
+  const L = 85.05112878;
+  const x = 256 * tileX + pX;
+  const y = 256 * tileY + pY;
+
+  const lon = 180 * (x / (1 << (tileZ + 7)) - 1);
+  const lat = (180/Math.PI) * Math.asin(Math.tanh(
+    - Math.PI / (1 << (tileZ + 7)) * y + Math.atanh(Math.sin(L * Math.PI/180))
+  ));
+  return {lat: lat, lon: lon};
+}
+
+function pixelSize(tileZ, tileX, tileY) {
+  // North west / South east / Center
+  const pNW =pixelOnTileToLatLon(0, 0, tileZ, tileX, tileY);
+  const pSE = pixelOnTileToLatLon(255, 255, tileZ, tileX, tileY);
+  const pCenter = pixelOnTileToLatLon(128, 128, tileZ, tileX, tileY);
+  
+  const deg2rad = deg => deg / 180 * Math.PI;
+  
+  return {
+    min: resolution(deg2rad(pNW.lat), tileZ),
+    max: resolution(deg2rad(pSE.lat), tileZ),
+    center: resolution(deg2rad(pCenter.lat), tileZ)
+  };
+}
+
+https://openlayers.org/en/latest/examples/osm-vector-tiles.html
+
+https://cloud.maptiler.com/account/keys/
+https://temp-mail.org/en/
+cevewo8680@eilnews.com vbxVBX333#
+h3WICQANUooj1n2U0lPk
+
+https://api.maptiler.com/tiles/v3-openmaptiles/tiles.json?key=h3WICQANUooj1n2U0lPk
+https://api.maptiler.com/tiles/v3-openmaptiles/6/18/23.pbf?key=h3WICQANUooj1n2U0lPk
+https://api.maptiler.com/tiles/v3-openmaptiles/{z}/{x}/{y}.pbf?key=h3WICQANUooj1n2U0lPk
+
+https://api.maptiler.com/tiles/v3-openmaptiles/{z}/{x}/{y}.pbf?key=h3WICQANUooj1n2U0lPk
+
+https://tile.nextzen.org/tilezen/vector/v1/all/{z}/{x}/{y}.topojson?api_key=
+
+https://github.com/mapbox/vector-tile-spec/tree/master/2.1
+https://docs.mapbox.com/data/tilesets/guides/vector-tiles-standards/
+https://www.mapzen.com/projects/vector-tiles/
+https://stevebennett.me/2017/08/23/openstreetmap-vector-tiles-mixing-and-matching-engines-schemas-and-styles/ 7nmb 

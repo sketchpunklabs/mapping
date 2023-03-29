@@ -1,0 +1,10 @@
+https://nodematerial-editor.babylonjs.com/
+https://playground.babylonjs.com/#4QH8JM
+
+https://patrickryanms.github.io/BabylonJStextures/Demos/waveShader/assets/gltf/bars.glb
+
+let animZ = lerp( maxZ, minZ, animationTime );
+let rngZ  = animZ - fragZ;
+
+leadEdgeA = rngZ remap -0.3,0.5 to 1.0,0.0
+trailingEdgeA = rngZ remap -0.9,-0.1 to 1.0,0.0 

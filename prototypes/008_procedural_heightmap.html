@@ -1,0 +1,389 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; background-color:black; }</style>
+<body><script src="../import-map.js"></script><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene } from '../lib/useThreeWebGL2.js';
+import TexturePass      from '../lib/misc/TexturePass.js';
+import TextureCanvas    from '../lib/misc/TextureCanvas.js'; 
+import GridAlternative  from '../lib/meshes/GridAlternative.js';
+import PlaneGrid        from '../lib/meshes/PlaneGrid.js';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 30, 10 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const matHeight = await HeightmapMaterial();
+    const texPass   = new TexturePass( matHeight, 256, 256 );
+    texPass.render( App.renderer );
+
+    const matDisplace = await DisplacementMaterial( texPass.texture );
+    const mesh = GridAlternative.mesh( matDisplace, 4, 4, 100, 100, false, false );
+    // const mesh = PlaneGrid( { mat:matDisplace, size:4, segments:160 } );
+    // // mesh.position.y = 0.01;
+    // // mesh.position.x = 2;
+    // // mesh.position.z = 2;
+    
+    App.scene.add( mesh );
+
+    const quad = new THREE.Mesh( 
+        new THREE.PlaneGeometry( 1, 1 ), 
+        new THREE.MeshBasicMaterial( { map:texPass.texture, side:THREE.DoubleSide, } ) 
+    );
+    quad.position.set( -2, 1.0, 0 );
+    quad.scale.setScalar( 2 );
+    App.scene.add( quad );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+// #endregion
+
+
+// https://discourse.threejs.org/t/calculating-vertex-normals-after-displacement-in-the-vertex-shader/16989/8
+async function DisplacementMaterial( tex ){
+    return new THREE.RawShaderMaterial({
+    depthTest       : true,
+    transparent 	: true,
+	side			: THREE.DoubleSide,
+    uniforms        : { 
+        heightmap   : { type :'sampler2D', value:tex },
+        hScale      : { type :'float', value: 1.5 },
+    },
+    
+    vertexShader    : `#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    uniform sampler2D heightmap;
+    uniform mediump float hScale;
+
+    out vec3 fragNorm;
+    out vec3 fragWPos;
+    out vec3 fragLPos;
+    out vec2 fragUV;
+    out float fragN;
+   
+    /////////////////////////////////////////////////////////////////
+
+    // http://lolengine.net/blog/2013/09/21/picking-orthogonal-vector-combing-coconuts
+    vec3 orthogonal(vec3 v) {
+        return normalize(
+            abs(v.x) > abs(v.z) ? 
+                vec3( -v.y,  v.x, 0.0 ) : 
+                vec3(  0.0, -v.z, v.y )
+        );
+    }
+
+    // https://discourse.threejs.org/t/calculating-vertex-normals-after-displacement-in-the-vertex-shader/16989/8
+    vec3 displacementNormal( vec3 dispPos, vec3 pos, vec3 norm, vec2 uv, float hScale, sampler2D map ){
+        // HARD CODED VALUES, Should by dynamic
+        float texelSize = 1.0 / 256.0;
+        float offset    = 0.01;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get Neighboring Points using Tangent + Bit Tangent
+        vec3 tangent    = orthogonal( norm );
+        vec3 bitTangent = normalize( cross( norm, tangent ) );
+
+        vec3 pos1       = pos + tangent * offset;
+        vec3 pos2       = pos + bitTangent * offset;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Grab the Displacement for the neighboring points
+        vec2 uv1        = uv + vec2( -texelSize, 0.0 );
+        vec2 uv2        = uv + vec2( 0.0, -texelSize );
+
+        vec3 dispPos1   = pos1 + norm * ( texture( map, uv1 ).r * hScale );
+        vec3 dispPos2   = pos2 + norm * ( texture( map, uv2 ).r * hScale );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute the final displacement normal
+        vec3 dispTan    = dispPos1 - dispPos;
+        vec3 dispBTan   = dispPos2 - dispPos;
+
+        return normalize( cross( dispTan, dispBTan ) );
+    }
+
+
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // DISPLACEMENT
+        vec3 pos     = position;
+        vec4 px      = texture( heightmap, uv );
+        pos.y        = px.x * hScale;
+
+        fragNorm     = displacementNormal( pos, position, normal, uv, hScale, heightmap );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec4 wPos   = modelMatrix * vec4( pos, 1.0 );
+        fragWPos    = wPos.xyz;
+        fragLPos    = position;
+        fragUV      = uv;
+        fragN       = px.x;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`,
+	
+    fragmentShader  : `#version 300 es
+    precision mediump float;
+
+    uniform sampler2D heightmap;
+    uniform sampler2D linetex;
+    uniform mediump float hScale;
+
+    in vec3  fragNorm;
+    in vec3  fragWPos;
+    in vec3  fragLPos;
+    in vec2  fragUV;
+    in float fragN;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////////
+
+    vec3 lightPos = vec3( 1.0, 5.0, 1.0 );
+
+    void main(){
+        // float h  = texture( heightmap, fragUV ).r;
+        // outColor = vec4( h, h, h, 1.0 );
+
+        // Base color using noise from vertex shader
+        outColor = vec4( fragN, fragN, fragN, 1.0 );
+
+        // Create normals using derivitive functions. Makes things look low poly
+        // But since I currently can't compute NORMALS from noise displacement
+        // this will have to do for now.
+        // vec3 norm = normalize( cross( dFdx( fragWPos), dFdy( fragWPos ) ) );
+        vec3 norm = normalize( fragNorm );
+
+        // Do some very basic lighting
+        float diffuse = dot( norm, normalize( lightPos - fragWPos ) );
+        outColor.rgb *= clamp( 0.2, 1.0, diffuse );
+    }`
+    });
+}
+
+async function HeightmapMaterial(){
+    return new THREE.RawShaderMaterial({
+    // depthTest       : true,
+    // transparent 	: false,
+	// side			: THREE.DoubleSide,
+    uniforms        : { 
+    },
+    
+    vertexShader    : `#version 300 es
+    in vec3 position;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec3 fragWPos;
+    out vec2 fragUV;
+
+    void main(){
+        vec4 wPos   = modelMatrix * vec4( position, 1.0 );;
+        
+        fragUV      = uv;
+        fragWPos    = wPos.xyz;
+
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`,
+	
+    fragmentShader  : `#version 300 es
+    precision mediump float;
+
+    in vec3 fragWPos;
+    in vec2 fragUV;
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+    // #region NOISE
+    vec2 _fade(vec2 t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
+    vec4 _rand4(vec4 p) { return mod(((p * 34.0) + 1.0) * p, 289.0); }
+    float perlinNoise( vec2 P ){
+        vec4 Pi = floor(P.xyxy) + vec4(0.0, 0.0, 1.0, 1.0);
+        vec4 Pf = fract(P.xyxy) - vec4(0.0, 0.0, 1.0, 1.0);
+        Pi = mod(Pi, 289.0); // To avoid truncation effects in permutation
+        vec4 ix = Pi.xzxz;
+        vec4 iy = Pi.yyww;
+        vec4 fx = Pf.xzxz;
+        vec4 fy = Pf.yyww;
+        vec4 i = _rand4(_rand4(ix) + iy);
+        vec4 gx = 2.0 * fract(i * 0.0243902439) - 1.0; // 1/41 = 0.024...
+        vec4 gy = abs(gx) - 0.5;
+        vec4 tx = floor(gx + 0.5);
+        gx = gx - tx;
+        vec2 g00 = vec2(gx.x, gy.x);
+        vec2 g10 = vec2(gx.y, gy.y);
+        vec2 g01 = vec2(gx.z, gy.z);
+        vec2 g11 = vec2(gx.w, gy.w);
+        vec4 norm =
+            1.79284291400159 - 0.85373472095314 * vec4(dot(g00, g00), dot(g01, g01),
+                                                        dot(g10, g10), dot(g11, g11));
+        g00 *= norm.x;
+        g01 *= norm.y;
+        g10 *= norm.z;
+        g11 *= norm.w;
+        float n00 = dot(g00, vec2(fx.x, fy.x));
+        float n10 = dot(g10, vec2(fx.y, fy.y));
+        float n01 = dot(g01, vec2(fx.z, fy.z));
+        float n11 = dot(g11, vec2(fx.w, fy.w));
+        vec2 fade_xy = _fade(Pf.xy);
+        vec2 n_x = mix(vec2(n00, n01), vec2(n10, n11), fade_xy.x);
+        float n_xy = mix(n_x.x, n_x.y, fade_xy.y);
+        return 2.3 * n_xy;
+    }
+
+    vec3 simplex_rand3(vec3 p) { return mod(((p * 34.0) + 1.0) * p, 289.0); }
+    float simplex( vec2 v ){
+        const vec4 C = vec4( 0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+        vec2 i = floor(v + dot(v, C.yy));
+        vec2 x0 = v - i + dot(i, C.xx);
+        vec2 i1;
+
+        i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod(i, 289.0);
+
+        vec3 p = simplex_rand3(simplex_rand3(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+        vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+        m = m * m;
+        m = m * m;
+
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 ox = floor(x + 0.5);
+        vec3 a0 = x - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+        
+        vec3 g;
+        g.x = a0.x * x0.x + h.x * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+    }
+
+
+    //	Classic Perlin 3D Noise 
+    //	by Stefan Gustavson
+    //
+    vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
+    vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
+    vec3 fade(vec3 t) {return t*t*t*(t*(t*6.0-15.0)+10.0);}
+
+    float cnoise(vec3 P){
+        vec3 Pi0 = floor(P); // Integer part for indexing
+        vec3 Pi1 = Pi0 + vec3(1.0); // Integer part + 1
+        Pi0 = mod(Pi0, 289.0);
+        Pi1 = mod(Pi1, 289.0);
+        vec3 Pf0 = fract(P); // Fractional part for interpolation
+        vec3 Pf1 = Pf0 - vec3(1.0); // Fractional part - 1.0
+        vec4 ix = vec4(Pi0.x, Pi1.x, Pi0.x, Pi1.x);
+        vec4 iy = vec4(Pi0.yy, Pi1.yy);
+        vec4 iz0 = Pi0.zzzz;
+        vec4 iz1 = Pi1.zzzz;
+
+        vec4 ixy = permute(permute(ix) + iy);
+        vec4 ixy0 = permute(ixy + iz0);
+        vec4 ixy1 = permute(ixy + iz1);
+
+        vec4 gx0 = ixy0 / 7.0;
+        vec4 gy0 = fract(floor(gx0) / 7.0) - 0.5;
+        gx0 = fract(gx0);
+        vec4 gz0 = vec4(0.5) - abs(gx0) - abs(gy0);
+        vec4 sz0 = step(gz0, vec4(0.0));
+        gx0 -= sz0 * (step(0.0, gx0) - 0.5);
+        gy0 -= sz0 * (step(0.0, gy0) - 0.5);
+
+        vec4 gx1 = ixy1 / 7.0;
+        vec4 gy1 = fract(floor(gx1) / 7.0) - 0.5;
+        gx1 = fract(gx1);
+        vec4 gz1 = vec4(0.5) - abs(gx1) - abs(gy1);
+        vec4 sz1 = step(gz1, vec4(0.0));
+        gx1 -= sz1 * (step(0.0, gx1) - 0.5);
+        gy1 -= sz1 * (step(0.0, gy1) - 0.5);
+
+        vec3 g000 = vec3(gx0.x,gy0.x,gz0.x);
+        vec3 g100 = vec3(gx0.y,gy0.y,gz0.y);
+        vec3 g010 = vec3(gx0.z,gy0.z,gz0.z);
+        vec3 g110 = vec3(gx0.w,gy0.w,gz0.w);
+        vec3 g001 = vec3(gx1.x,gy1.x,gz1.x);
+        vec3 g101 = vec3(gx1.y,gy1.y,gz1.y);
+        vec3 g011 = vec3(gx1.z,gy1.z,gz1.z);
+        vec3 g111 = vec3(gx1.w,gy1.w,gz1.w);
+
+        vec4 norm0 = taylorInvSqrt(vec4(dot(g000, g000), dot(g010, g010), dot(g100, g100), dot(g110, g110)));
+        g000 *= norm0.x;
+        g010 *= norm0.y;
+        g100 *= norm0.z;
+        g110 *= norm0.w;
+        vec4 norm1 = taylorInvSqrt(vec4(dot(g001, g001), dot(g011, g011), dot(g101, g101), dot(g111, g111)));
+        g001 *= norm1.x;
+        g011 *= norm1.y;
+        g101 *= norm1.z;
+        g111 *= norm1.w;
+
+        float n000 = dot(g000, Pf0);
+        float n100 = dot(g100, vec3(Pf1.x, Pf0.yz));
+        float n010 = dot(g010, vec3(Pf0.x, Pf1.y, Pf0.z));
+        float n110 = dot(g110, vec3(Pf1.xy, Pf0.z));
+        float n001 = dot(g001, vec3(Pf0.xy, Pf1.z));
+        float n101 = dot(g101, vec3(Pf1.x, Pf0.y, Pf1.z));
+        float n011 = dot(g011, vec3(Pf0.x, Pf1.yz));
+        float n111 = dot(g111, Pf1);
+
+        vec3 fade_xyz = fade(Pf0);
+        vec4 n_z = mix(vec4(n000, n100, n010, n110), vec4(n001, n101, n011, n111), fade_xyz.z);
+        vec2 n_yz = mix(n_z.xy, n_z.zw, fade_xyz.y);
+        float n_xyz = mix(n_yz.x, n_yz.y, fade_xyz.x); 
+        return 2.2 * n_xyz;
+    }
+    // #endregion
+    ////////////////////////////////////////////////////////////////////////
+
+    void main(){
+        // float freq  = 3.0;
+        // float n     = perlinNoise( fragUV * freq ) * 0.5 + 0.5; // Remap -1,1 to 0,1
+
+        // float freq  = 1.5;
+        // float n     = simplex( fragUV * freq ) * 0.5 + 0.5; // Remap -1,1 to 0,1
+        
+        // float n = cnoise( fragWPos ) * 0.5 + 0.5; // Remap -1,1 to 0,1
+
+        // float n  = cnoise( fragWPos.xyz * 3.3 ) * 0.5 + 0.5;
+        //       n += ( cnoise( fragWPos.xyz * 8.0 + 123.0 ) * 0.5 + 0.5 );
+        //       n  = clamp( n, 0.0, 1.0 );
+
+        float n  = cnoise( vec3( fragUV, 0.0 ) * 3.2 ) * 0.7;
+              n += cnoise( vec3( fragUV, 0.0 ) * 8.0 + 123.0 ) * 0.2;
+              n  = n * 0.5 + 0.5;
+              n  = clamp( n, 0.0, 1.0 );
+
+        outColor = vec4( n, n, n, 1.0 );    
+        
+        // Test if noise goes into the negatives
+        // if( n < 0.0 ) outColor = vec4( 1, 0, 0, 1.0 );
+        // else          outColor = vec4( n, n, n, 1.0 );
+    }`
+    });
+}
+
+</script></body></html>
