@@ -1,0 +1,341 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; background-color:black; }</style>
+<body><script src="../import-map.js"></script><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene } from '../lib/useThreeWebGL2.js';
+import noise from '../lib/thirdparty/perlin.js';
+// #endregion
+
+// #region MAIN
+
+/*
+NOTES:
+Originally a R3F project, took it appart & rebuit it using vanilla javascript & threejs.
+
+https://github.com/jsulpis/3d-terrain-r3f/
+https://jsulpis.github.io/3d-terrain-r3f/
+https://twitter.com/jsulpis/status/1574463548843069440?s=20
+
+*/
+
+function useCustomScene( tjs ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // LIGHTS
+    let lit;
+    tjs.scene.add( new THREE.HemisphereLight( 'white', 'darkslategrey', 0.4 ) ); 
+
+    lit = new THREE.DirectionalLight( 0xffffff, 0.3 );
+    lit.position.set( 1, 1, 1 );
+    tjs.scene.add( lit );
+
+    lit = new THREE.DirectionalLight( 'orange', 2.5 );
+    lit.castShadow = true;
+    lit.shadowBias = -0.0002;
+    lit.position.set( -5, 3, -5 );
+    tjs.scene.add( lit );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Floor
+    // tjs.scene.add( new THREE.GridHelper( 20, 20, 0x0c610c, 0x444444 ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Renderer
+    // tjs.renderer.setClearColor( 0x141414, 1 );  // 0x3a3a3a
+    return tjs;
+};
+
+let App   = useCustomScene( useThreeWebGL2( {colorModeR3F:true, shadows:true} ) );
+let Ref   = {
+    // MISC
+    height         : 2,
+    freq           : 0.02,
+    flat           : -1,
+    
+    // FBM
+    persistance    : 0.4,
+    lacunarity     : 2,
+    redistribution : 1,
+    octaves        : 3,
+};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 40, 10 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.iGrid = new InstanceGrid( 150 );
+    App.scene.add( Ref.iGrid.cubes );
+    
+    updateMap();
+    initUI();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     App.renderLoop();
+});
+// #endregion
+
+// #region UP & UPDATES
+function initUI(){
+    document.getElementById( 'inFlat' ).addEventListener( 'input', e=>{
+        Ref.flat = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inHeight' ).addEventListener( 'input', e=>{
+        Ref.height = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inFreq' ).addEventListener( 'input', e=>{
+        Ref.freq = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inPers' ).addEventListener( 'input', e=>{
+        Ref.persistance = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inLac' ).addEventListener( 'input', e=>{
+        Ref.lacunarity = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inRedist' ).addEventListener( 'input', e=>{
+        Ref.redistribution = parseFloat( e.target.value );
+        updateMap();
+    });
+
+    document.getElementById( 'inOct' ).addEventListener( 'input', e=>{
+        Ref.octaves = parseFloat( e.target.value );
+        updateMap();
+    });
+}
+
+function updateMap(){
+    const grid      = Ref.iGrid;
+    const resOffset = Math.floor( grid.resolution / 2 );
+    const coord     = [0,0];
+    let n;
+
+    for( let i=0; i < grid.cellCnt; i++ ){
+        grid.idx2Coord( i, coord );
+
+        // Offset coordinates so they go inthe negativess
+        // This helps scale the terrain from the center instead
+        // from the left top corner
+        coord[0] = ( coord[0] - resOffset ) * Ref.freq;
+        coord[1] = ( coord[1] - resOffset ) * Ref.freq;
+
+        n = fbmVec2( coord, Ref.persistance, Ref.lacunarity, Ref.redistribution, Ref.octaves );
+
+        grid.setHeight( i, Math.max( Ref.flat, n * Ref.height ) ); // Flatten Water
+        // grid.setHeight( i,  n * Ref.height  ); // See Water Depth
+        grid.setColor( i, ColorRamp.at( n ) );
+    }
+
+    grid.updateTransforms();
+}
+// #endregion
+
+// #region GENERATE GRID BLOCKS
+
+// persistance    : How much each octave contributes to the overall shape
+// lacunarity     : How much detail is added or removed at each octave
+// octaves        : Levels of detail you want you perlin noise to have
+// redistribution : Level of flatness within the valleys
+function fbmVec2( pos, persistance=0.4, lacunarity=2, redistribution=1, octaves=3 ){
+    let result    = 0.0;
+    let amplitude = 1.0;
+    let frequency = 1.0;
+    let maximum   = amplitude;
+    let noiseVal  = 0.0;
+    let p         = [0,0];
+
+    for(let i = 0; i < octaves; i++ ){
+        p[0] = pos[0] * frequency;
+        p[1] = pos[1] * frequency;
+
+        noiseVal    = noise.perlin2( p[0] , p[1] );
+        result     += noiseVal * amplitude;
+
+        frequency  *= lacunarity;
+        amplitude  *= persistance;
+        maximum    += amplitude;
+    }
+
+    const redistributed = Math.pow( result, redistribution );
+    return redistributed / maximum;
+}
+
+// Color the blocks by the NOISE value
+class ColorRamp{
+    // #region RAMP
+    static colors = [
+        0x00a9ff,    // Water
+        0xffd68f,    // Shore
+        0xefb28f,    // Beach
+        0x9ea667,    // Shrub
+        0x586647,    // Forest
+        0x656565,    // Stone
+        0x9aa7ad     // Snow
+    ];
+    static weights = [
+        0.0,
+        0.01,
+        0.04,
+        0.1,
+        0.29,
+        0.36,
+        0.6
+    ];
+    // #endregion
+
+    // #region HELPERS
+    static col = new THREE.Color();
+    static hsl = { h: 0, s: 1, l: 1 };
+    // #endregion
+
+    // #region METHODS
+    static at( n ){
+        let c = null;
+        for( let i=0; i < this.colors.length; i++ ){
+            if( n <= this.weights[ i ] ){
+                c = this.colors[ i ];
+                break;
+            }
+        }
+
+        if( c === null ) c = this.colors[ this.colors.length-1 ];
+
+        this.col.set( c );
+        this.col.getHSL( this.hsl );
+
+        // If its water, try to  color it based on depth
+        // by using HSL. Else just increase saturation
+        if( n <= 0 ){
+            // scale the light based on the negative noise which is
+            // noise value of the water's depth
+
+            let l = Math.pow( ( 1.0 - Math.abs( n ) ) * 0.95, 6 );
+            // l = 1 - Math.pow( Math.abs( n ), 6 );
+            // l = 0.1;
+            
+            // let min = 0.6;
+            // let max = 0.0;
+            // let t   = Math.abs( n );
+            // l = min * (1-t) + max * (t);
+
+            this.col.setHSL( this.hsl.h, this.hsl.s * 1.7, l );
+        }else{
+            this.col.setHSL( this.hsl.h, this.hsl.s * 1.7, this.hsl.l );
+        }
+
+        return this.col.getHex();
+    }
+    // #endregion
+}
+
+// Instance cube into a grid
+class InstanceGrid{
+    offset      = [-4,0,-4];     // Offset block positions
+    gridSize    = 8;              // Size of the grid
+    cellSize    = 0;               // Size of a block
+    cellCnt     = 0;               // Total Blocks 
+    resolution  = 0;               // How many blocks to span X & Z
+    
+    obj         = new THREE.Object3D(); // Easier then using THREE.Matrix to create Matrix
+    col         = new THREE.Color();    // Used to set color to instance 
+    cells       = [];                   // Hold current position of each block
+    cubes       = null;                 // Instance Mesh
+
+    constructor( res=20 ){
+        this.resolution = res;
+        this.cellSize   = this.gridSize / this.resolution;
+        this.cellCnt    = res * res;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Create instance Mesh
+        const mat = new THREE.MeshPhongMaterial();
+        const geo = new THREE.BoxGeometry( 1, 1, 1 );
+        geo.translate( 0.5, 0.5, 0.5 );
+        
+        this.cubes = new THREE.InstancedMesh( geo, mat, this.cellCnt );
+        this.cubes.instanceMatrix.setUsage( THREE.DynamicDrawUsage );
+        this.cubes.castShadow    = true;
+        this.cubes.receiveShadow = true;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Setup Initial Cell Data
+        const coord = [0,0];
+        this.cells  = new Array( this.cellCnt );
+        for( let i=0; i < this.cellCnt; i++ ){
+            this.idx2Coord( i, coord );
+            this.cells[ i ] = {
+                pos: [
+                    ( coord[0] * this.cellSize ) + this.offset[ 0 ],
+                    0,
+                    ( coord[1] * this.cellSize ) + this.offset[ 2 ],
+                ]
+            };
+        }
+    }
+
+    // Convert index to XY coordinate
+    idx2Coord( idx, out=[0,0] ){
+        out[1]  = Math.floor( idx / this.resolution );
+        out[0]  = idx - ( out[1] * this.resolution );
+        return out;
+    }
+
+    setHeight( i, h ){ this.cells[ i ].pos[ 1 ] = h; }
+    setColor( i, c ){ this.cubes.setColorAt( i, this.col.set( c ) ); }
+
+    updateTransforms(){
+        for( let i=0; i < this.cellCnt; i++ ){
+            // Create Transform, Just scale & translation
+            this.obj.scale.setScalar( this.cellSize );
+            this.obj.position.fromArray( this.cells[ i ].pos );
+            this.obj.updateMatrix();
+
+            // Save matrix to instance
+            this.cubes.setMatrixAt( i, this.obj.matrix );
+        }
+
+        this.cubes.instanceMatrix.needsUpdate = true;
+        this.cubes.instanceColor.needsUpdate  = true;
+        // this.cubes.computeBoundingSphere();
+    }
+}
+
+// #endregion
+
+</script>
+
+<div style="position:fixed; left:10px; bottom:10px; display:flex; flex-direction:column; color:white; font-family:monospace;">
+    <div>Flatten Water:</div>
+    <input id="inFlat" type="range" min="-1" max="0" step="0.1" value="-1">
+
+    <div>Height:</div>
+    <input id="inHeight" type="range" min="0.1" max="10" step="0.1" value="2">
+    
+    <!--Is 'Scale'-->
+    <div>Freq:</div>
+    <input id="inFreq" type="range" min="0.001" max="0.1" step="0.001" value="0.02">
+
+    <!--Is 'Fuzzyness'-->
+    <br><div>FBM:persistance</div>
+    <input id="inPers" type="range" min="0.01" max="2.0" step="0.01" value="0.4">
+
+    <!--Is 'Detail'-->
+    <br><div>FBM:lacunarity</div>
+    <input id="inLac" type="range" min="0.1" max="6.0" step="0.1" value="2">
+
+    <br><div>FBM:redistribution</div>
+    <input id="inRedist" type="range" min="0.1" max="2.0" step="0.1" value="1">
+
+    <br><div>FBM:octaves</div>
+    <input id="inOct" type="range" min="1" max="6" step="1" value="3">
+</div>
+
+</body></html>
