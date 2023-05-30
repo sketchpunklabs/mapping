@@ -7,8 +7,9 @@ innerHTML	: `
     {"imports":{
         "three"             : "${prepend}/lib/thirdparty/three.module.min.js",
         "OrbitControls"	    : "${prepend}/lib/thirdparty/OrbitControls.js",
+        "TransformControls"	: "${prepend}/lib/thirdparty/TransformControls.js",
         "gl-matrix"         : "${prepend}/lib/thirdparty/gl-matrix/index.js",
         "earcut"            : "${prepend}/lib/thirdparty/earcut.js",
-        "postprocess/"       : "${prepend}/lib/thirdparty/threePostProcess/"
+        "postprocess/"      : "${prepend}/lib/thirdparty/threePostProcess/"
     }}
 `}));

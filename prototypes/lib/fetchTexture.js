@@ -10,7 +10,7 @@ export default async function fetchTexture( url, flipY=true, isRepeat=false ){
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // Make it a texture
     const tex       = new Texture( img );
-    tex.wrapT       = tex.wrapS = ( isRepeat )? ClampToEdgeWrapping : RepeatWrapping;
+    tex.wrapT       = tex.wrapS = ( isRepeat )? RepeatWrapping : ClampToEdgeWrapping;
     tex.flipY       = flipY;
     tex.needsUpdate = true; // Needed, else it may render as black
     return tex;
