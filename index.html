@@ -22,48 +22,59 @@
 
 <div>
     <h1>Maps &amp; Terrains</h1>
-
-    <div style="display:flex;">
-        <div style="flex: 1 1 auto;">
-
-            <p class="dim">
-                I have interest in building virtual worlds that can be used in games or apps. There was an interesting
-                demo by @wooorldXR that really inspired me into trying my hand in learning how to build a 3D map viewer
-                from scratch. So this repo will contain all the little experiments & prototypes using freely available mapping
-                data to recreate that demo & then some :)
-            </p>
-        
-            <p class="dim">
-                Another purpose of this repo is to develop a collection of examples / prototypes that is feature focused. Ideally
-                this should make it easier for people to pick apart & learn how each bit works as a good starting point. Mind you,
-                nothing here is production ready as things aren't optimized or very well abstracted. Since the goal is for learning,
-                things are kept as bare bones and simple as possible.
-            </p>
-        
-            <p>
-                <b>Inspiration</b> :<br>
-                    - <a href="https://twitter.com/haltor/status/1594166328356704258">https://twitter.com/haltor/status/1594166328356704258</a><br>
-                    - <a href="https://twitter.com/tiltfive/status/1597644083828518913">https://twitter.com/tiltfive/status/1597644083828518913</a><br>
-                    - <a href="https://twitter.com/SketchpunkLabs/status/1600487910758907905">https://twitter.com/SketchpunkLabs/status/1600487910758907905</a><br>
-            </p>
-        
-            <p>
-                <b>Source Code</b> : <a href="https://github.com/sketchpunklabs/mapping">https://github.com/sketchpunklabs/mapping</a>
-            </p>
-
-        </div>
-        <div style="flex: 0 0 230px; text-align:right;">
-            <img src="./images/state_building.png" style="margin-left:10px; width:220px;"><br>
-            <img src="./images/terrain_tile.png" style="margin-left:10px; width:220px;"><br>
-            <img src="./images/topo.png" style="margin-left:10px; width:220px;">
-        </div>
+    <div>
+        <p class="dim">
+            I have interest in building virtual worlds that can be used in games or apps. There was an interesting
+            demo by @wooorldXR that really inspired me into trying my hand in learning how to build a 3D map viewer
+            from scratch. So this repo will contain all the little experiments & prototypes using freely available mapping
+            data to recreate that demo & then some :)
+        </p>
+    
+        <p class="dim">
+            Another purpose of this repo is to develop a collection of examples / prototypes that is feature focused. Ideally
+            this should make it easier for people to pick apart & learn how each bit works as a good starting point. Mind you,
+            nothing here is production ready as things aren't optimized or very well abstracted. Since the goal is for learning,
+            things are kept as bare bones and simple as possible.
+        </p>
+    
+        <p>
+            <b>Inspiration</b> :<br>
+                - <a href="https://twitter.com/haltor/status/1594166328356704258">https://twitter.com/haltor/status/1594166328356704258</a><br>
+                - <a href="https://twitter.com/tiltfive/status/1597644083828518913">https://twitter.com/tiltfive/status/1597644083828518913</a><br>
+                - <a href="https://twitter.com/SketchpunkLabs/status/1600487910758907905">https://twitter.com/SketchpunkLabs/status/1600487910758907905</a><br>
+        </p>
+    
+        <p>
+            <b>Source Code</b> : <a href="https://github.com/sketchpunklabs/mapping">https://github.com/sketchpunklabs/mapping</a>
+        </p>
     </div>
-
+    
+    <div style="display:flex; flex-direction:row; flex-wrap: wrap; justify-content: center;">
+        <img src="./images/state_building.png" style="flex:0 0; height:150px;">
+        <img src="./images/terrain_tile.png" style="flex:0 0; height:150px;">
+        <img src="./images/topo.png" style="flex:0 0; height:150px;">
+        <img src="./images/goo3dtiles.png" style="flex:0 0; height:150px;">
+        <img src="./images/voxels.png" style="flex:0 0; height:150px;">
+    </div>
     <hr>
 
     <table width="100%" cellspacing="5"><tr><td width="50%" valign="top">
         <b>Mapping Tile Prototypes</b>
         <ol>
+
+            <li><a href="./prototypes/013_google_3dtiles_search.html">Google Photorealistic 3DTiles - Render tile at LonLat ( API Key Needed )</a>
+                <p>Modification from the basic example, this one converts LonLat coordinates of the empire state building
+                    to cartesian cords then performs a tree search for the last possible tile to render. It streams down sub tilesets
+                    during the tile search in the process. Renders the 3D tile when the location has been found.
+                </p>
+            </li>
+
+            <li><a href="./prototypes/013_google_3dtiles_barebones.html">Google Photorealistic 3DTiles - Basic ( API Key Needed )</a>
+                <p>From scratch with a basic 3D Tiles parser & loader, this example shows how to parse 3D tiles
+                    from google, download JSON and GLBs to render two initial tiles in the tileset.
+                </p>
+            </li>
+
             <li><a href="./prototypes/006_vector_tile.html">Vector Tiles</a>
                 <p>Download PBF data, use protobuf to deserialize binary into JSON. From there turn the points, lines and 
                     polygons into meshes that can be rendered with webgl.

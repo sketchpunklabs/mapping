@@ -1,0 +1,409 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; background-color:black; }</style>
+<body><script src="../import-map.js"></script><script type="module">
+
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../lib/useThreeWebGL2.js';
+import Gltf2                    from '../lib/thirdparty/gltf2parser.es.js';
+import { DracoDecoderModule }   from '../lib/thirdparty/draco/draco_decoder_gltf.js';
+import { vec3, quat }           from 'gl-matrix';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug; 
+let Ref   = {};
+
+// https://github.com/eliemichel/MapsModelsImporter/tree/master/blender/MapsModelsImporter
+// https://github.com/snowzurfer/globale
+// https://github.com/ebeaufay/UltraGlobe
+// https://github.com/ebeaufay/threedtiles
+
+// https://github.com/strandedkitty/streets-gl
+// https://github.com/playcanvas/earthatile
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App.sphericalLook( 0, 20, 5, [0,0,0] );
+    Debug     = await useVisualDebug( App );
+    Ref.Draco = await DracoDecoderModule();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+    // const key  = '';
+    // startMapping( key );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    initUI();
+});
+
+function initUI(){
+    let   hasStarted = false;
+    const tb = document.getElementById( 'tbKey' );
+    tb.value = sessionStorage.getItem( 'key' );
+
+    document.getElementById( 'btnStart' ).addEventListener( 'click', e=>{
+        if( hasStarted ) return;
+
+        if( !tb.value ){
+            alert( 'Enter API Key to start' );
+            return;
+        }
+
+        sessionStorage.setItem( 'key', tb.value );
+        
+        hasStarted = true;
+        startMapping( tb.value );
+    });
+}
+
+function startMapping( key ){
+    const ts   = new Tileset( key, 'https://tile.googleapis.com' );
+    Ref.ts     = ts;
+
+    ts.initFetch()
+        .then( ()=>onReady() )
+        .catch( err=>{
+            console.log( err );
+            alert( err );
+        });
+}
+
+function onReady(){
+    const ts = Ref.ts;
+    // console.log( ts.root );
+
+    const t =  ts.root.children[0];
+    const s = 1 / 7972671.25;
+    debugOBB( t.volume.c, t.volume.x, t.volume.y, t.volume.z, s, 0xffffff );
+
+    const colors = [ 0xff0000, 0x00ff00, 0x0000ff, 0x00ffff ];
+    let i=0;
+    for( const c of t.children ){
+        const ii = i++ % colors.length;
+        debugOBB( c.volume.c, c.volume.x, c.volume.y, c.volume.z, s, colors[ ii ] );
+
+        if( c.contentUri ){
+            ts.loadTileContent( c ).then( gltf=>loadGltfMesh( gltf, c ) );
+            // break;
+        }
+    }
+}
+
+// #endregion
+
+
+// #region GLTF PARSING
+async function loadGltfMesh( gltf, tile ){
+    // console.log( gltf.json );
+    if( gltf.needsDraco ) gltf.useDraco( Ref.Draco );
+    const gMesh = gltf.getMesh();
+    const gTex  = gltf.getTexture( 0 );
+    gltf.dispose();
+    // console.log( gMesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Texture
+    const img       = await blobToImage( gTex.blob );
+    const tex       = new THREE.Texture( img );
+    tex.wrapT       = THREE.RepeatWrapping;// : ClampToEdgeWrapping;
+    tex.flipY       = false;
+    tex.needsUpdate = true; // Needed, else it may render as black
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create 3JS Mesh
+    const s    = 1 / 7972671.25; 
+    const bGeo = primitiveGeo( gMesh.primitives[0] );
+    // const mesh = new THREE.Mesh( bGeo, new THREE.MeshPhongMaterial( {color:0x00ffff, flatShading:true }) );
+    const mesh = new THREE.Mesh( bGeo, new THREE.MeshBasicMaterial( { map:tex }) );
+    
+    // Scale only to make it viewable, not production way to do things
+    mesh.scale.setScalar( s ); 
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // GLTF mesh data is YUp, to match bounding box need to fix it to be ZUp.
+    mesh.rotation.x = Math.PI * 0.5;
+
+    // Position needs to be rotated too before applied
+    // const q = quat.setAxisAngle( [], [1,0,0], Math.PI * 0.5 );
+    // const p = vec3.transformQuat( [], gMesh.position, q );
+    // mesh.position.set(
+    //     (p[0]) * s,
+    //     (p[1]) * s,
+    //     (p[2]) * s,
+    // );
+    
+    mesh.position.set(              // Simpler way to handle 90d rotation on XAxis
+        gMesh.position[0]  * s,
+        -gMesh.position[2] * s,
+        gMesh.position[1]  * s,
+    );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.scene.add( mesh );
+}
+
+function primitiveGeo( prim ){
+    let geo;
+    geo = new THREE.BufferGeometry();
+    geo.setAttribute( 'position', new THREE.BufferAttribute( prim.position.data, prim.position.componentLen ) );
+
+    if( prim.indices )    geo.setIndex( new THREE.BufferAttribute( prim.indices.data, 1 ) );
+    if( prim.normal )     geo.setAttribute( 'normal', new THREE.BufferAttribute( prim.normal.data, prim.normal.componentLen ) );
+    if( prim.texcoord_0 ) geo.setAttribute( 'uv', new THREE.BufferAttribute( prim.texcoord_0.data, prim.texcoord_0.componentLen ) );
+
+    return geo;
+}
+
+function blobToImage(blob){
+    return new Promise( ( resolve, reject )=>{
+        const url   = URL.createObjectURL(blob);
+        const img   = new Image()
+        img.onload  = ()=>{ URL.revokeObjectURL( url ); resolve( img ) };
+        img.src     = url;
+    } );
+}
+// #endregion
+
+
+// #region DEBUGGING
+function debugOBB( c, x, y, z, s=1, col=0x00ff00, is_dash=false ){
+    const ba = [ (c[0] - x[0] + y[0] - z[0]) *s, (c[1] - x[1] + y[1] - z[1]) *s, (c[2] - x[2] + y[2] - z[2]) *s ];
+    const bb = [ (c[0] - x[0] - y[0] - z[0]) *s, (c[1] - x[1] - y[1] - z[1]) *s, (c[2] - x[2] - y[2] - z[2]) *s ];
+    const bc = [ (c[0] + x[0] - y[0] - z[0]) *s, (c[1] + x[1] - y[1] - z[1]) *s, (c[2] + x[2] - y[2] - z[2]) *s ];
+    const bd = [ (c[0] + x[0] + y[0] - z[0]) *s, (c[1] + x[1] + y[1] - z[1]) *s, (c[2] + x[2] + y[2] - z[2]) *s ];
+    const fa = [ (c[0] - x[0] + y[0] + z[0]) *s, (c[1] - x[1] + y[1] + z[1]) *s, (c[2] - x[2] + y[2] + z[2]) *s ];
+    const fb = [ (c[0] - x[0] - y[0] + z[0]) *s, (c[1] - x[1] - y[1] + z[1]) *s, (c[2] - x[2] - y[2] + z[2]) *s ];
+    const fc = [ (c[0] + x[0] - y[0] + z[0]) *s, (c[1] + x[1] - y[1] + z[1]) *s, (c[2] + x[2] - y[2] + z[2]) *s ];
+    const fd = [ (c[0] + x[0] + y[0] + z[0]) *s, (c[1] + x[1] + y[1] + z[1]) *s, (c[2] + x[2] + y[2] + z[2]) *s ];
+    Debug.ln.add( ba, bb, col, null, is_dash ); // Back
+    Debug.ln.add( bb, bc, col, null, is_dash );
+    Debug.ln.add( bc, bd, col, null, is_dash );
+    Debug.ln.add( bd, ba, col, null, is_dash );
+    Debug.ln.add( fa, fb, col, null, is_dash ); // Front
+    Debug.ln.add( fb, fc, col, null, is_dash );
+    Debug.ln.add( fc, fd, col, null, is_dash );
+    Debug.ln.add( fd, fa, col, null, is_dash );
+    Debug.ln.add( fa, ba, col, null, is_dash ); // Connect
+    Debug.ln.add( fb, bb, col, null, is_dash );
+    Debug.ln.add( fc, bc, col, null, is_dash );
+    Debug.ln.add( fd, bd, col, null, is_dash );
+    return this
+}
+
+function obb2box( c, x, y, z ){
+    const ba = [ c[0] - x[0] + y[0] - z[0], c[1] - x[1] + y[1] - z[1], c[2] - x[2] + y[2] - z[2] ];
+    const bb = [ c[0] - x[0] - y[0] - z[0], c[1] - x[1] - y[1] - z[1], c[2] - x[2] - y[2] - z[2] ];
+    const bc = [ c[0] + x[0] - y[0] - z[0], c[1] + x[1] - y[1] - z[1], c[2] + x[2] - y[2] - z[2] ];
+    const bd = [ c[0] + x[0] + y[0] - z[0], c[1] + x[1] + y[1] - z[1], c[2] + x[2] + y[2] - z[2] ];
+    const fa = [ c[0] - x[0] + y[0] + z[0], c[1] - x[1] + y[1] + z[1], c[2] - x[2] + y[2] + z[2] ];
+    const fb = [ c[0] - x[0] - y[0] + z[0], c[1] - x[1] - y[1] + z[1], c[2] - x[2] - y[2] + z[2] ];
+    const fc = [ c[0] + x[0] - y[0] + z[0], c[1] + x[1] - y[1] + z[1], c[2] + x[2] - y[2] + z[2] ];
+    const fd = [ c[0] + x[0] + y[0] + z[0], c[1] + x[1] + y[1] + z[1], c[2] + x[2] + y[2] + z[2] ];
+    
+    const min = [
+        Math.min( ba[0], bb[0], bc[0], bd[0], fa[0], fb[0], fc[0], fd[0] ),
+        Math.min( ba[1], bb[1], bc[1], bd[1], fa[1], fb[1], fc[1], fd[1] ),
+        Math.min( ba[2], bb[2], bc[2], bd[2], fa[2], fb[2], fc[2], fd[2] ),
+    ];
+
+    const max = [
+        Math.max( ba[0], bb[0], bc[0], bd[0], fa[0], fb[0], fc[0], fd[0] ),
+        Math.max( ba[1], bb[1], bc[1], bd[1], fa[1], fb[1], fc[1], fd[1] ),
+        Math.max( ba[2], bb[2], bc[2], bd[2], fa[2], fb[2], fc[2], fd[2] ),
+    ];
+
+    return [ min, max ];
+}
+// #endregion
+
+
+// #region CUSTOM 3D TILES PARSER
+/*
+NOTES:
+- Tileset parser isn't saving or using transform data since it does not show up
+in the google 3d tiles. Only one exists far is in root.json but its an identity matrix.
+If using other tilesets this can be a problem with placement if its not handled when available.
+*/
+
+class Tile{
+    parent          = null;
+    children        = [];
+    geoError        = -1;
+    volume          = null;
+    refine          = 'REPLACE';
+    contentUri      = null;
+    mesh            = null;
+    level           = 0;
+    constructor( json ){
+        if( json.boundingVolume ) this.setVolume( json.boundingVolume.box );
+        if( json.geometricError ) this.geoError     = json.geometricError;
+        if( json.refine )         this.refine       = json.refine;
+        if( json.content )        this.contentUri   = json.content.uri;
+
+        // console.log( json.transform );
+    }
+
+    setVolume( box ){
+        // https://github.com/CesiumGS/3d-tiles/tree/main/specification#box
+        // [ cx,cy,cz, xHalf..., yHalf..., zHalf... ] 
+        this.volume = {
+            c : [ box[0], box[1],  box[2]  ],   // Center
+            x : [ box[3], box[4],  box[5]  ],   // X Half Length
+            y : [ box[6], box[7],  box[8]  ],   // Y Half length
+            z : [ box[9], box[10], box[11] ],   // Z Half Length
+        };
+
+        return this;
+    }
+
+    addChild( t ){
+        this.children.push( t );
+        t.level  = this.level + 1;
+        t.parent = this;
+    }
+}
+
+class Tileset{
+    // #region MAIN
+    count   = 0;
+    maxLvl  = 0;
+    key     = '';
+    session = '';
+    uri     = '';
+    tiles   = [];
+    root    = null;
+    constructor( key, baseUri ){
+        this.key = key;
+        this.uri = baseUri;
+    }
+    // #endregion
+
+    // #region METHODS
+
+    loadJson( json ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Create root tile in relation to his json
+        let tile = new Tile( json );
+        this.count++;
+
+        if( !this.root ) this.root = tile;
+        if( !json.children || json.children.length === 0 ) return;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Load in the rest of the tile data
+        const stack = [];
+        for( let i of json.children ) stack.push( [i,tile] );
+
+        while( stack.length > 0 ){
+            const [ js, parent ] = stack.pop();
+            tile = new Tile( js );
+            this.count++;
+
+            parent.addChild( tile );
+            this.maxLvl = Math.max( this.maxLvl, tile.level );
+
+            if( js?.children?.length > 0 ){
+                for( let i of js.children ) stack.push( [i,tile] );
+            }
+        }
+
+        console.log( 'Total Tiles', this.count );
+        console.log( 'Max Level', this.maxLvl );
+    }
+    
+    loadTileContent( tile ){
+        const i   = tile.contentUri.lastIndexOf( '.' );
+        const ext = tile.contentUri.substr( i+1 );
+
+        switch( ext.toUpperCase() ){
+            case 'GLB':
+                const url = `${this.uri}${tile.contentUri}?key=${this.key}&session=${this.session}`;
+                // console.log( 'load mesh', url );
+                return this.fetchGLB( url )
+                    .catch( err=>console.error( 'Error loading GLB', err ));
+                break;
+            default:
+                console.error( 'unknown tile content extension:', ext );
+                break;
+        }
+    }
+    
+    // #endregion
+
+    // #region FETCHING
+    async initFetch(){
+        let json     = null;
+        let url      = sessionStorage.getItem( 'tilesetUrl' );
+        this.session = sessionStorage.getItem( 'sessionId' );
+
+        if( !this.session || !url ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Download Root JSON
+            let json = await this.fetchJson( this.uri + '/v1/3dtiles/root.json?key=' + this.key );
+            
+        
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Find Session in one of the children & get the url to the tileset.json
+            let stack = [ json.root ];
+            while( stack.length > 0 ){
+                const n = stack.pop();
+                // console.log( n.transform );
+                if( n.content ){
+                    const sPos = n.content.uri.indexOf( 'session=' );
+                    if( sPos !== -1 ){
+                        this.session = n.content.uri.substr( sPos + 8 );
+                        url          = n.content.uri;
+                        break;
+                    }
+                }
+
+                if( n.children ) stack.push( ...n.children );
+            }
+
+            if( !this.session ) throw new Error( 'Session ID not found' );
+
+            // Store for page reloads. Will be lost when browser closes
+            // Was told that Root.json is stricter for rate limit access.
+            // so storing it in session will prevent calling it more
+            // then once successfully.
+            sessionStorage.setItem( 'sessionId', this.session );
+            sessionStorage.setItem( 'tilesetUrl', url );
+            console.log( 'saving sessionID to sessionStorage', this.session );
+        }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // The root JSON is kinda wasteful & contains worthless data
+        // The only child that contains a URI is the true starting
+        // tileset for 3D tiles.
+        json = await this.fetchJson( this.uri + url + '&key=' + this.key );
+        this.loadJson( json.root );
+    }
+
+    async fetchJson( url ){
+        const res = await fetch( url );
+        if( !res.ok ) throw new Error( `${res.status} - ${res.statusText} - ${url}` );
+
+        // Download Content
+        const json = await res.json();
+        if( !json ) throw new Error( 'Unable to download json');
+
+        return json;
+    }
+    
+    async fetchGLB( url ){
+        const gltf = await Gltf2.fetch( url );
+        return gltf;
+    }
+    // #endregion
+}
+// #endregion
+
+</script>
+<style>
+    .container{ position:fixed; left:10px; top:10px; }
+</style>
+<div class="container">
+    <input type="text" id="tbKey" placeholder="API Key"><button id="btnStart">Start</button>
+</div>
+</body></html>
