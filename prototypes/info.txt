@@ -1,0 +1,14 @@
+https://cloud.google.com/blog/products/maps-platform/create-immersive-3d-map-experiences-photorealistic-3d-tiles
+
+https://developers.google.com/maps/documentation/tile/3d-tiles-overview
+
+https://developers.google.com/maps/documentation/tile/cloud-setup#console_1
+https://developers.google.com/maps/documentation/tile/get-api-key#whats-next
+https://console.cloud.google.com/welcome/new?project=third-expanse-387812
+
+https://developers.google.com/maps/documentation/tile/create-renderer
+
+API-Key
+AIzaSyAnd4qd3PGxOFc7g7F-33NHCqqPgXyf7U4
+
+https://www.youtube.com/watch?v=kxAwkT9M6rM

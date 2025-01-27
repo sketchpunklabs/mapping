@@ -1,0 +1,69 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../import-map.js"></script>
+<script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
+<link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+<script type="module">
+
+window.addEventListener( 'load', async _=>{
+    const map = new maplibregl.Map({
+        container   : 'map',
+        style       : '../lib/thirdparty/map_style.json',
+        center      : [-74.006, 40.712],
+        zoom        : 13,
+    });
+    
+    map.on( 'mousedown', e=>{
+        console.log( e.point );
+        console.log( e.lngLat );
+    });
+
+    // https://maplibre.org/maplibre-gl-js/docs/examples/drag-a-point/
+
+    map.on( 'load', ()=>{
+        console.log( 'Map Loaded' );
+
+        map.addSource( 'conferences', {
+            'type': 'geojson',
+            'data': {
+                'type': 'FeatureCollection',
+                'features': [
+                    {
+                        'type'      : 'Feature',
+                        'geometry'  : { 'type': 'Point', 'coordinates': [-74.006, 40.712] },
+                        'properties': { 'year': 'w00t' },
+                    },
+                ]
+            }
+        });
+
+        // Add a symbol layer
+        map.addLayer({
+            'id': 'conferences',
+            'type': 'symbol',
+            'source': 'conferences',
+            'paint': { 'text-color': '#ffffff' },
+            'layout': {
+                // 'icon-image': 'custom-marker',
+                // get the year from the source's "year" property
+                'text-field': ['get', 'year'],
+                'text-font': [
+                    'Open Sans Semibold',
+                    'Arial Unicode MS Bold'
+                ],
+                'text-offset': [0, 1.25],
+                'text-anchor': 'top'
+            }
+        });
+
+
+    });
+
+
+    
+
+});
+</script>
+<div id="map" style="height:100vh; width:100vw;"></div>
+
+</body></html>

@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; background-color:white; }</style>
+<body>
+<canvas width="255px" height="255px"></canvas>
+<script src="../import-map.js"></script><script type="module">
+// #region IMPORTS
+// import useThreeWebGL2, { THREE, useDarkScene } from '../lib/useThreeWebGL2.js';
+// import TexturePass      from '../lib/misc/TexturePass.js';
+// import GridAlternative  from '../lib/meshes/GridAlternative.js';
+// #endregion
+
+// #region MAIN
+// let App   = useDarkScene( useThreeWebGL2() );
+// let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+    const W      = 32;
+    const H      = 255;
+    const canvas = document.querySelector( 'canvas' );
+    const ctx    = canvas.getContext( '2d' );
+
+    const bigLineWidth =  0.04;
+    const smallLineWidth = 0.01;
+    const smallLineAlpha = 1.0;
+    const linesCount = 5;
+
+    ctx.fillRect( 0, H, W, 4 );
+    ctx.clearRect(0, 0, W, H );
+
+    ctx.globalAlpha = smallLineAlpha;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect( 0, 0, W, Math.round( H * bigLineWidth ) ); 
+
+
+    const smallLinesCount = linesCount - 1;
+    for (let i = 0; i < smallLinesCount; i++) {
+        ctx.fillRect(
+            0,
+            Math.round( H / linesCount ) * ( i + 1 ),
+            W,
+            Math.round( H * smallLineWidth )
+        );
+    }
+});
+// #endregion
+
+</script></body></html>

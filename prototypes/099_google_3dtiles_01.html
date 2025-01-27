@@ -1,0 +1,313 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; background-color:black; }</style>
+<body><script src="../import-map.js"></script><script type="module">
+
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../lib/useThreeWebGL2.js';
+import fetchJson from './lib/fetchJson.js';
+import { vec3 } from 'gl-matrix';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug; 
+let Ref   = {};
+
+// https://github.com/eliemichel/MapsModelsImporter/tree/master/blender/MapsModelsImporter
+// https://github.com/snowzurfer/globale
+// https://github.com/ebeaufay/UltraGlobe
+// https://github.com/ebeaufay/threedtiles
+
+// https://github.com/strandedkitty/streets-gl
+// https://github.com/playcanvas/earthatile  Works well and is simple... I think
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App.sphericalLook( 0, 20, 5, [0,0,0] );
+    Debug = await useVisualDebug( App );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+    // debugOBB( [0,0,0], [1,0,0], [0,1,0], [0,0,1], 0.1 );
+    // const [min,max] = obb2box( [0,0,0], [1,0,0], [0,1,0], [0,0,1] );
+    // Debug.ln.box( min, max );
+
+    // 
+    const key  = 'AIzaSyAnd4qd3PGxOFc7g7F-33NHCqqPgXyf7U4';
+    const url  = 'https://tile.googleapis.com/v1/3dtiles/root.json?key=' + key;
+    const test = 'https://tile.googleapis.com/v1/3dtiles/datasets/CgA/files/UlRPVEYuYnVsa21ldGFkYXRhLnBsYW5ldG9pZD1lYXJ0aCxidWxrX21ldGFkYXRhX2Vwb2NoPTk0NyxwYXRoPSxjYWNoZV92ZXJzaW9uPTY.json?session=COOA9rTZxvDFjQE&key=' + key;
+
+    const ts   = new Tileset();
+    Ref.ts     = ts;
+
+    ts.initFetch( url )
+    // ts.initFetch( '../tiles/root.json' )
+        .then( ()=>onReady( ts ) )
+        .catch( err=>console.log( err ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+function onReady( ts ){
+    const t = ts.tiles[0];
+    const s = 1 / 7972671.25;
+    // debugOBB( t.volume.c, t.volume.x, t.volume.y, t.volume.z, s );
+
+    const list = ts.getChildren( t );
+    const list2 = ts.getChildren( list[0] );
+
+    console.log( t );
+    console.log( list );
+
+    // debugOBB( list[0].volume.c, list[0].volume.x, list[0].volume.y, list[0].volume.z, s, 0xff0000 );
+    // debugOBB( list[1].volume.c, list[1].volume.x, list[1].volume.y, list[1].volume.z, s, 0x00ff00 );
+    // debugOBB( list[2].volume.c, list[2].volume.x, list[2].volume.y, list[2].volume.z, s, 0x0000ff );
+    // debugOBB( list[3].volume.c, list[3].volume.x, list[3].volume.y, list[3].volume.z, s, 0x00ffff );
+    // console.log( list );
+
+    // renderChildren( t );
+    // renderChildren( list2[0] );
+}
+
+function renderChildren( t ){
+    const s = 1 / 7972671.25;
+    debugOBB( t.volume.c, t.volume.x, t.volume.y, t.volume.z, s );
+
+    const list = Ref.ts.getChildren( t );
+    console.log( 'Children', t.children, list );
+    debugOBB( list[0].volume.c, list[0].volume.x, list[0].volume.y, list[0].volume.z, s, 0xff0000 );
+    debugOBB( list[1].volume.c, list[1].volume.x, list[1].volume.y, list[1].volume.z, s, 0x00ff00 );
+    debugOBB( list[2].volume.c, list[2].volume.x, list[2].volume.y, list[2].volume.z, s, 0x0000ff );
+    debugOBB( list[3].volume.c, list[3].volume.x, list[3].volume.y, list[3].volume.z, s, 0x00ffff );
+}
+// #endregion
+
+function debugOBB( c, x, y, z, s=1, col=0x00ff00, is_dash=false ){
+    const ba = [ (c[0] - x[0] + y[0] - z[0]) *s, (c[1] - x[1] + y[1] - z[1]) *s, (c[2] - x[2] + y[2] - z[2]) *s ];
+    const bb = [ (c[0] - x[0] - y[0] - z[0]) *s, (c[1] - x[1] - y[1] - z[1]) *s, (c[2] - x[2] - y[2] - z[2]) *s ];
+    const bc = [ (c[0] + x[0] - y[0] - z[0]) *s, (c[1] + x[1] - y[1] - z[1]) *s, (c[2] + x[2] - y[2] - z[2]) *s ];
+    const bd = [ (c[0] + x[0] + y[0] - z[0]) *s, (c[1] + x[1] + y[1] - z[1]) *s, (c[2] + x[2] + y[2] - z[2]) *s ];
+    const fa = [ (c[0] - x[0] + y[0] + z[0]) *s, (c[1] - x[1] + y[1] + z[1]) *s, (c[2] - x[2] + y[2] + z[2]) *s ];
+    const fb = [ (c[0] - x[0] - y[0] + z[0]) *s, (c[1] - x[1] - y[1] + z[1]) *s, (c[2] - x[2] - y[2] + z[2]) *s ];
+    const fc = [ (c[0] + x[0] - y[0] + z[0]) *s, (c[1] + x[1] - y[1] + z[1]) *s, (c[2] + x[2] - y[2] + z[2]) *s ];
+    const fd = [ (c[0] + x[0] + y[0] + z[0]) *s, (c[1] + x[1] + y[1] + z[1]) *s, (c[2] + x[2] + y[2] + z[2]) *s ];
+    Debug.ln.add( ba, bb, col, null, is_dash ); // Back
+    Debug.ln.add( bb, bc, col, null, is_dash );
+    Debug.ln.add( bc, bd, col, null, is_dash );
+    Debug.ln.add( bd, ba, col, null, is_dash );
+    Debug.ln.add( fa, fb, col, null, is_dash ); // Front
+    Debug.ln.add( fb, fc, col, null, is_dash );
+    Debug.ln.add( fc, fd, col, null, is_dash );
+    Debug.ln.add( fd, fa, col, null, is_dash );
+    Debug.ln.add( fa, ba, col, null, is_dash ); // Connect
+    Debug.ln.add( fb, bb, col, null, is_dash );
+    Debug.ln.add( fc, bc, col, null, is_dash );
+    Debug.ln.add( fd, bd, col, null, is_dash );
+    return this
+}
+
+function obb2box( c, x, y, z ){
+    const ba = [ c[0] - x[0] + y[0] - z[0], c[1] - x[1] + y[1] - z[1], c[2] - x[2] + y[2] - z[2] ];
+    const bb = [ c[0] - x[0] - y[0] - z[0], c[1] - x[1] - y[1] - z[1], c[2] - x[2] - y[2] - z[2] ];
+    const bc = [ c[0] + x[0] - y[0] - z[0], c[1] + x[1] - y[1] - z[1], c[2] + x[2] - y[2] - z[2] ];
+    const bd = [ c[0] + x[0] + y[0] - z[0], c[1] + x[1] + y[1] - z[1], c[2] + x[2] + y[2] - z[2] ];
+    const fa = [ c[0] - x[0] + y[0] + z[0], c[1] - x[1] + y[1] + z[1], c[2] - x[2] + y[2] + z[2] ];
+    const fb = [ c[0] - x[0] - y[0] + z[0], c[1] - x[1] - y[1] + z[1], c[2] - x[2] - y[2] + z[2] ];
+    const fc = [ c[0] + x[0] - y[0] + z[0], c[1] + x[1] - y[1] + z[1], c[2] + x[2] - y[2] + z[2] ];
+    const fd = [ c[0] + x[0] + y[0] + z[0], c[1] + x[1] + y[1] + z[1], c[2] + x[2] + y[2] + z[2] ];
+    
+    const min = [
+        Math.min( ba[0], bb[0], bc[0], bd[0], fa[0], fb[0], fc[0], fd[0] ),
+        Math.min( ba[1], bb[1], bc[1], bd[1], fa[1], fb[1], fc[1], fd[1] ),
+        Math.min( ba[2], bb[2], bc[2], bd[2], fa[2], fb[2], fc[2], fd[2] ),
+    ];
+
+    const max = [
+        Math.max( ba[0], bb[0], bc[0], bd[0], fa[0], fb[0], fc[0], fd[0] ),
+        Math.max( ba[1], bb[1], bc[1], bd[1], fa[1], fb[1], fc[1], fd[1] ),
+        Math.max( ba[2], bb[2], bc[2], bd[2], fa[2], fb[2], fc[2], fd[2] ),
+    ];
+
+    return [ min, max ];
+}
+
+function fitBoxPerspectiveDistance( camera, width, height, depth, cover=false ){
+    // Cover tries to fill width more then height
+    const fov      = camera.getEffectiveFOV() * 0.01745329251; // FOV in Radians
+    const camRatio = camera.aspect;
+    const boxRatio = width / height;
+
+    const fitSize  = ( cover ? boxRatio > camRatio : boxRatio < camRatio ) ? height : width / camRatio;
+    return fitSize * 0.5 / Math.tan( fov * 0.5 ) + depth * 0.5;
+}
+
+
+function fetchDebug( url ){
+    return new Promise( async ( resolve, reject )=>{
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get response
+        const res = await fetch( url );
+
+        console.log( 'Response', res );
+        console.log( 'Header', res.headers );
+        if( !res.ok ){ reject( res.status ); return; }
+
+        // // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // // Download Binary
+        // const json = await res.json();
+        // if( !json ){ reject( 'Unable to download json' ); return; }
+
+        // resolve( json );
+    });
+}
+
+class Tile{
+    index           = -1;
+    pIndex          = -1;
+    children        = [];
+    geoError        = -1;
+    volume          = null;
+    refine          = 'REPLACE';
+    content         = null;
+    subTilesetUri   = null;
+    level           = 0;
+    constructor( idx, json ){
+        this.index = idx;
+
+        if( json.boundingVolume ) this.setVolume( json.boundingVolume.box );
+        if( json.geometricError ) this.geoError = json.geometricError;
+        if( json.refine )         this.refine   = json.refine;
+        if( json.content )        this.content  = json.content.uri;
+    }
+
+    setVolume( box ){
+        // https://github.com/CesiumGS/3d-tiles/tree/main/specification#box
+        // [ cx,cy,cz, xHalf..., yHalf..., zHalf... ] 
+        this.volume = {
+            c : [ box[0], box[1],  box[2]  ],   // Center
+            x : [ box[3], box[4],  box[5]  ],   // X Half Length
+            y : [ box[6], box[7],  box[8]  ],   // Y Half length
+            z : [ box[9], box[10], box[11] ],   // Z Half Length
+        };
+
+        return this;
+    }
+
+    setParent( t ){
+        this.level  = t.level + 1;
+        this.pIndex = t.index;
+        t.children.push( this.index );
+    }
+}
+
+class Tileset{
+    // #region MAIN
+    key     = 'AIzaSyAnd4qd3PGxOFc7g7F-33NHCqqPgXyf7U4';
+    session = '';
+    uri     = '';
+    tiles   = [];
+    constructor(){}
+    // #endregion
+
+    // #region METHODS
+    loadJson( json, pIndex=-1 ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Create Root Tile
+        let tile = new Tile( this.tiles.length, json );
+        this.tiles.push( tile );
+
+        if( pIndex !== -1 ) tile.setParent( this.tiles[ pIndex ] );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Process node tree
+        const stack = json.children.map( i=> [i,tile] );
+        
+        while( stack.length > 0 ){
+            let [ js, pTile ] = stack.pop();
+
+            let tile = new Tile( this.tiles.length, js );
+            this.tiles.push( tile );
+            tile.setParent( pTile );
+
+            // console.log( js.children[0]?.content?.uri );
+
+            if( js?.children?.length === 1 && js.children[0].content.uri.indexOf( '.json') !== -1 ){
+                tile.subTilesetUri = js.children[0].content.uri;
+            } else if( js?.children?.length > 0 ){
+                for( let i of js.children ) stack.push( [ i, tile ] );
+            }
+        }
+
+        // console.log( this.tiles[0] );
+        // console.log( this.tiles );
+    }
+
+    getChildren( t ){
+        const out = [];
+        for( const idx in t.children ){
+            out.push( this.tiles[ idx ] );
+        }
+        return out;
+    }
+    // #endregion
+
+    // #region FETCHING
+    async initFetch( url ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Generate the root uri to tileset & content fetching
+        let i    = url.indexOf( '://' );
+        i        = ( i != -1 )? i + 3 : 0;
+
+        let j    = url.indexOf( '/', i );
+        this.uri = url.substring( 0, j );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Google doesn't follow normal 3D Tiles, Root json is 
+        // only a driver to point to the true root tileset.
+        let tsUrl = '';
+        let json  = await this.fetchJson( url );
+        json = json.root;
+
+        do{
+            if( json?.children?.length === 1 ) json = json.children[0];
+            
+            if( json.content ){
+                tsUrl = json.content.uri; 
+                break;
+            }
+        }while( json.children );
+
+        if( !tsUrl ) throw new Error( 'Root content json not found' );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        const sPos = tsUrl.indexOf( 'session=' );
+        if( sPos === -1 ) throw new Error( 'Session ID not found' );
+
+        this.session = tsUrl.substr( sPos + 8 );
+        tsUrl        = this.uri + tsUrl + '&key=' + this.key ;
+
+        // console.log( tsUrl, this.session );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // tsUrl = this.uri + '/tiles/tileset.json'; // TODO remove
+        json  = await this.fetchJson( tsUrl );
+        this.loadJson( json.root );
+    }
+
+    async fetchJson( url ){
+        const res = await fetch( url );
+        if( !res.ok ) throw new Error( `${res.status} - ${res.statusText} - ${url}` );
+
+        // Download Content
+        const json = await res.json();
+        if( !json ) throw new Error( 'Unable to download json');
+
+        return json;
+    }
+    // #endregion
+}
+
+// {"asset":{"version":"1.0"},"geometricError":1e+100,"root":{"boundingVolume":{"box":[0,0,0,7972671.25,0,0,0,7972671.25,0,0,0,7945940.3928064629]},"geometricError":1e+100,"refine":"REPLACE","transform":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],"children":[{"boundingVolume":{"box":[0,0,0,7972671.25,0,0,0,7972671.25,0,0,0,7945940.3928064629]},"geometricError":1e+100,"refine":"REPLACE","children":[{"boundingVolume":{"box":[0,0,0,7972671.25,0,0,0,7972671.25,0,0,0,7945940.3928064629]},"geometricError":1e+100,"content":{"uri":"/v1/3dtiles/datasets/CgA/files/UlRPVEYuYnVsa21ldGFkYXRhLnBsYW5ldG9pZD1lYXJ0aCxidWxrX21ldGFkYXRhX2Vwb2NoPTk0NyxwYXRoPSxjYWNoZV92ZXJzaW9uPTY.json?session=COOA9rTZxvDFjQE"}}],"extras":{"comment":"path = ''"}}]},"extensionsUsed":["3DTILES_content_gltf"],"extensionsRequired":["3DTILES_content_gltf"]}
+
+// https://tile.googleapis.com/v1/3dtiles/datasets/CgA/files/UlRPVEYubm9kZWRhdGEucGxhbmV0b2lkPWVhcnRoLG5vZGVfZGF0YV9lcG9jaD05NTMscGF0aD0zMSxjYWNoZV92ZXJzaW9uPTYsaW1hZ2VyeV9lcG9jaD05NzQ.glb?session=CK3cz9KG8q_YbBD7hoCmBg&key=AIzaSyAnd4qd3PGxOFc7g7F-33NHCqqPgXyf7U4
+</script></body></html>

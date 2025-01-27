@@ -1,0 +1,51 @@
+   //https://github.com/Geodan/mapbox-3dtiles/blob/master/Mapbox3DTiles.mjs
+
+   let worldBox = this.box.clone().applyMatrix4(this.worldTransform);
+    let dist = worldBox.distanceToPoint(cameraPosition);
+    
+
+    //console.log(`dist: ${dist}, geometricError: ${this.geometricError}`);
+    // are we too far to render this tile?
+    if (this.geometricError > 0.0 && dist > this.geometricError * 50.0) {
+      this.unload(true);
+      return;
+    }
+    //console.log(`camPos: ${cameraPosition.z}, dist: ${dist}, geometricError: ${this.geometricError}`);
+    
+    // should we load this tile?
+    if (this.refine == 'REPLACE' && dist < this.geometricError * 20.0) {
+      this.unload(false);
+    } else {
+      this.load();
+    }
+    
+    
+    // should we load its children?
+    for (let i=0; i<this.children.length; i++) {
+      if (dist < this.geometricError * 20.0) {
+        this.children[i].checkLoad(frustum, cameraPosition);
+      } else {
+        this.children[i].unload(true);
+      }
+    }
+
+    /*
+    // below code loads tiles based on screenspace instead of geometricError,
+    // not sure yet which algorith is better so i'm leaving this code here for now
+    let sw = this.box.min.clone().project(camera);
+    let ne = this.box.max.clone().project(camera);      
+    let x1 = sw.x, x2 = ne.x;
+    let y1 = sw.y, y2 = ne.y;
+    let tilespace = Math.sqrt((x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1)); // distance in screen space
+    
+    if (tilespace < 0.2) {
+      this.unload();
+    }
+    // do nothing between 0.2 and 0.25 to avoid excessive tile loading/unloading
+    else if (tilespace > 0.25) {
+      this.load();
+      this.children.forEach(child => {
+        child.checkLoad(camera);
+      });
+    }*/
+    
